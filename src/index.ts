@@ -1,4 +1,5 @@
 export * from './task.js';
+export * from './config.js';
 export * from './metrics.js';
 export * from './sample.js';
 export * from './runner.js';
