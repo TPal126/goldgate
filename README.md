@@ -13,7 +13,7 @@ Most "eval scripts" quietly lie. They report a bare `0.90` precision computed ov
 
 - **Sealed holdouts, enforced twice.** The dev/holdout split is made at *sampling* time, before any labeling or extraction — the holdout file is sealed until dev work (prompt, model, thresholds) is frozen. It is re-checked at *eval* time: the runner refuses a holdout evaluation if any in-scope label carries `provenance: 'assisted'`, and warns that the configuration must be frozen from the dev run.
 - **Blind labeling.** On the dev set, an extractor may pre-label to speed review (`--assist`). On the holdout, assistance is *refused* — the label CLI throws rather than show you a proposal, so holdout ground truth is formed against guidelines, not against model output.
-- **Wilson lower bounds on every headline proportion.** No bare point estimates. A precision is reported as `92.5% (Wilson95 lower 84.1%, n=53)` — the interval and its raw denominator travel together, everywhere.
+- **Wilson lower bounds on every headline proportion.** No bare point estimates. A precision is reported as `92.5% (Wilson95 lower 82.1%, n=53)` — the interval and its raw denominator travel together, everywhere.
 - **Precision-at-budget release gates.** The gate pools precision/recall over your "gated" kinds and checks a point estimate, its Wilson lower bound, recall, a negative-class false-positive rate, and structured-field exact match — each threshold overridable per task. If the holdout yields fewer than the minimum pooled predicted positives (default 40), the gate **refuses to run** and tells you to label more and re-seal, rather than blessing a number computed over too little data.
 - **Calibration tables.** Every run with declared confidence levels emits observed precision at each self-reported confidence level, so `high`/`low` is validated against outcomes instead of trusted as self-report.
 - **No silent truncation, as an invariant.** An undersized corpus *throws* at sampling time. Sampled items missing a label or corpus row are skipped and the skip count is recorded in the run config. Items the extractor errored on are scored as errors and counted visibly in the report — never dropped to flatter a number.
@@ -92,17 +92,24 @@ export default defineConfig({
 Provision a test corpus file `corpus/tickets.jsonl` with sample items (one per line):
 
 ```jsonl
-{"id":"t-001","text":"app crashes when saving","queue":"mobile"}
-{"id":"t-002","text":"please add dark mode support","queue":"ui"}
-{"id":"t-003","text":"login button broken on iOS","queue":"mobile"}
+{"id":"t-001","text":"app crash on save when disk is full","queue":"mobile"}
+{"id":"t-002","text":"add dark mode to the settings screen","queue":"mobile"}
+{"id":"t-003","text":"login fails with SSO after password rotation","queue":"web"}
+{"id":"t-004","text":"error 500 from the export endpoint on large files","queue":"web"}
+{"id":"t-005","text":"thanks for the quick turnaround last week","queue":"web"}
+{"id":"t-006","text":"search results pagination is broken past page 3","queue":"web"}
+{"id":"t-007","text":"could we get CSV import for bulk tickets","queue":"mobile"}
+{"id":"t-008","text":"meeting notes from the retro attached","queue":"web"}
+{"id":"t-009","text":"crash loop on startup after the 2.3 update","queue":"mobile"}
+{"id":"t-010","text":"what is the SLA for enterprise plans","queue":"web"}
 ```
 
-Then run the three stages (scale the flags down to your corpus — `--total` may not exceed the corpus size, or sampling throws):
+Then run the three stages:
 
 ```bash
 # 1. Stratify + seal. Split (dev/holdout) is decided here, once, before labeling.
 npx goldgate sample --config goldgate.config.ts \
-  --total 400 --boosted-share 0.4 --holdout-share 0.3 --seed 7
+  --total 8 --boosted-share 0.25 --holdout-share 0.25 --seed 7
 
 # 2. Label the dev set in a small CLI. Add --assist keyword to pre-fill proposals
 #    (proposals are refused on --split holdout — holdout is blind by construction).
@@ -112,32 +119,33 @@ npx goldgate label --config goldgate.config.ts --split dev
 npx goldgate eval --config goldgate.config.ts --split dev --extractor keyword
 ```
 
-`eval` writes `work/runs/<run-id>/report.md` and `results.json`. The report looks like (illustrative numbers):
+`eval` writes `work/runs/<run-id>/report.md` and `results.json`. With this quickstart corpus and config, the report looks like:
 
 ```
-# Eval run 2026-07-02-08-30-keyword-dev
+# Eval run 2026-07-02-15-03-keyword-dev
 
 Tokens: 0 in / 0 out · mean latency 0ms/item
 
 ## Threshold ≥ low
 
-Pooled (bug+feature): precision 92.5% (Wilson95 lower 82.1%, n=53) · recall 71.2% ·
-negative-kind FP rate (random stratum) 3.4% · structured fields 88.0% (25 comparisons) · errored items: 0
+Pooled (bug+feature): precision 100.0% (Wilson95 lower 43.8%, n=3) · recall 100.0% · negative-kind FP rate (random stratum) 0.0% · structured fields 100.0% (2 comparisons) · errored items: 0
 
-Gate: PASS
+Gate: FAIL
+- undersized denominator: 3 pooled predicted positives < 40 — label more and re-seal before evaluating
+- Wilson 95% lower bound 0.438 < 0.8
 
 | kind | tp | fp | fn | precision | Wilson95↓ | recall | f1 |
 |---|---|---|---|---|---|---|---|
-| note | 61 | 6 | 4 | 91.0% | 81.9% | 93.8% | 92.4% |
-| bug | 34 | 3 | 9 | 91.9% | 78.7% | 79.1% | 85.0% |
-| feature | 15 | 1 | 8 | 93.8% | 71.7% | 65.2% | 76.9% |
+| note | 2 | 0 | 0 | 100.0% | 34.2% | 100.0% | 100.0% |
+| bug | 2 | 0 | 0 | 100.0% | 34.2% | 100.0% | 100.0% |
+| feature | 1 | 0 | 0 | 100.0% | 20.7% | 100.0% | 100.0% |
 
 ## Calibration (self-reported confidence vs observed precision)
 
 | confidence | typed predictions | correct | observed precision |
 |---|---|---|---|
-| high | 49 | 47 | 95.9% |
-| low | 4 | 2 | 50.0% |
+| high | 3 | 3 | 100.0% |
+| low | 0 | 0 | 0.0% |
 ```
 
 Once the dev configuration is frozen, evaluate the sealed holdout **once**: `npx goldgate eval --config goldgate.config.ts --split holdout --extractor keyword`. That single run is your gate decision.
