@@ -1,6 +1,6 @@
 {
   "name": "goldgate",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Statistically-gated eval harness for LLM classification/extraction tasks — sealed holdouts, blind labeling, Wilson-bound release gates.",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/TPal126/goldgate.git" },
