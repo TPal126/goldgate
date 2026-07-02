@@ -1,0 +1,227 @@
+// goldgate's Anthropic (Claude) adapter — a port of attune's
+// src/anthropic-client.ts (sync parse path) and eval/batch.ts (batch
+// mode, expires_at bail-out kept verbatim). @anthropic-ai/sdk and zod are
+// optional peers; this module is the ONLY place in goldgate that imports
+// them — the core (src/) never does.
+import { createHash } from 'node:crypto';
+import Anthropic from '@anthropic-ai/sdk';
+import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
+import type { MessageCreateParamsNonStreaming } from '@anthropic-ai/sdk/resources/messages/messages.js';
+import type { ZodType } from 'zod';
+import type { ExtractFn, BatchExtractor, TokenUsage } from '../src/task.js';
+
+// Inlined from attune's src/hash.ts (sha256Hex) — 12 lines, not worth a
+// shared dependency for a single adapter file.
+function sha256Hex(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+// Hash of the exact compiled output format sent to the API — recorded in
+// every eval run config (spec §2.3) so schema drift is visible across runs.
+export function schemaHash(schema: ZodType): string {
+  return sha256Hex(JSON.stringify(zodOutputFormat(schema)));
+}
+
+// Per-MTok USD prices for cost reporting (estimate; actuals from
+// invoices). Pricing stays consumer-side (spec: no pricing in core) — the
+// harness report only prints cost when the caller supplies costPer1MTokens.
+export const ANTHROPIC_PRICES: Record<string, { in: number; out: number }> = {
+  'claude-opus-4-8': { in: 5, out: 25 },
+  'claude-sonnet-4-6': { in: 3, out: 15 },
+  'claude-haiku-4-5': { in: 1, out: 5 },
+};
+
+export interface ClaudeExtractorOptions<Item> {
+  /** consumer's Zod schema */
+  schema: ZodType;
+  systemPrompt: string;
+  /** user-message builder — the attune buildUserMessage seam */
+  renderInput(input: { target: Item; context: Item[] }): string;
+  model: string;
+  effort?: 'low' | 'medium' | 'high';
+  /** default 2000 */
+  maxTokens?: number;
+  apiKey?: string;
+}
+
+function anthropicClientFor(apiKey: string | undefined): Anthropic {
+  return new Anthropic(apiKey !== undefined ? { apiKey } : {});
+}
+
+export function createClaudeExtractFn<Item, Pred>(
+  opts: ClaudeExtractorOptions<Item>,
+): ExtractFn<Item, Pred> {
+  const client = anthropicClientFor(opts.apiKey);
+  const format = zodOutputFormat(opts.schema);
+
+  return async (input) => {
+    const resp = await client.messages.parse({
+      model: opts.model,
+      max_tokens: opts.maxTokens ?? 2000,
+      thinking: { type: 'adaptive' },
+      system: opts.systemPrompt,
+      messages: [{ role: 'user', content: opts.renderInput(input) }],
+      output_config: {
+        format,
+        ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
+      },
+    });
+    // Conservative by refusal-to-fabricate: a non-end_turn stop or a null
+    // parsed_output surfaces as a thrown error — callers (the eval runner)
+    // record it as an errored item rather than fabricating a prediction.
+    if (resp.stop_reason !== 'end_turn' || resp.parsed_output === null || resp.parsed_output === undefined) {
+      throw new Error(`extraction failed (stop_reason=${resp.stop_reason ?? 'null'})`);
+    }
+    return {
+      prediction: resp.parsed_output as Pred,
+      usage: {
+        inputTokens: resp.usage.input_tokens,
+        outputTokens: resp.usage.output_tokens,
+      },
+    };
+  };
+}
+
+// --- batch mode ---
+
+export interface ClaudeBatchOptions<Item> extends ClaudeExtractorOptions<Item> {
+  /** Context assembly for batch requests; omit = no context. */
+  context?(corpus: Item[], target: Item, window: number): Item[];
+  contextWindow: number;
+  /** default 60_000 */
+  pollIntervalMs?: number;
+}
+
+interface BatchRequest {
+  custom_id: string;
+  params: MessageCreateParamsNonStreaming;
+}
+
+// Provider-neutral shape extracted from batch results so mapping stays
+// testable independent of the SDK's exact result typing.
+interface BatchResultEntry {
+  custom_id: string;
+  kind: 'succeeded' | 'errored' | 'expired' | 'canceled';
+  text: string | null;
+  usage: TokenUsage | null;
+}
+
+export function createClaudeBatch<Item extends { id: string }, Pred>(
+  opts: ClaudeBatchOptions<Item>,
+): BatchExtractor<Item, Pred> {
+  // AutoParseableOutputFormat<T> extends JSONOutputFormat, so this cast is
+  // sound — same cast style as attune's eval/batch.ts.
+  const format = zodOutputFormat(opts.schema) as MessageCreateParamsNonStreaming['output_config'] extends
+    { format?: infer F | null } ? NonNullable<F> : never;
+
+  function buildBatchRequests(targets: Item[], corpus: Item[]): BatchRequest[] {
+    return targets.map((target) => ({
+      custom_id: target.id,
+      params: {
+        model: opts.model,
+        max_tokens: opts.maxTokens ?? 2000,
+        thinking: { type: 'adaptive' as const },
+        system: opts.systemPrompt,
+        messages: [{
+          role: 'user' as const,
+          content: opts.renderInput({
+            target,
+            context: opts.context?.(corpus, target, opts.contextWindow) ?? [],
+          }),
+        }],
+        output_config: {
+          format,
+          ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
+        },
+      },
+    }));
+  }
+
+  // Live execution: create the batch, poll until ended, stream results
+  // into BatchResultEntry shape. The expires_at bail-out is kept VERBATIM
+  // from attune's eval/batch.ts runBatch: an unattended run must not poll
+  // forever past the API's 24h batch expiry.
+  async function runBatch(requests: BatchRequest[]): Promise<BatchResultEntry[]> {
+    const client = anthropicClientFor(opts.apiKey);
+    const pollIntervalMs = opts.pollIntervalMs ?? 60_000;
+    const batch = await client.messages.batches.create({ requests });
+    console.log(`batch ${batch.id} created (${requests.length} requests)`);
+    for (;;) {
+      const b = await client.messages.batches.retrieve(batch.id);
+      if (b.processing_status === 'ended') break;
+      // A stuck batch must not poll forever on an unattended run: the API
+      // expires batches at 24h — once past expires_at, bail loudly.
+      if (b.expires_at !== null && Date.now() >= new Date(b.expires_at).getTime()) {
+        throw new Error(`batch ${batch.id} passed expires_at without ending (status: ${b.processing_status})`);
+      }
+      console.log(`batch ${batch.id}: ${b.processing_status} (${JSON.stringify(b.request_counts)})`);
+      await new Promise((r) => setTimeout(r, pollIntervalMs));
+    }
+    const entries: BatchResultEntry[] = [];
+    for await (const result of await client.messages.batches.results(batch.id)) {
+      if (result.result.type === 'succeeded') {
+        const msg = result.result.message;
+        const textBlock = msg.content.find((c: { type: string }) => c.type === 'text');
+        entries.push({
+          custom_id: result.custom_id,
+          kind: 'succeeded',
+          text: textBlock !== undefined && 'text' in textBlock ? (textBlock as { text: string }).text : null,
+          usage: { inputTokens: msg.usage.input_tokens, outputTokens: msg.usage.output_tokens },
+        });
+      } else {
+        entries.push({
+          custom_id: result.custom_id,
+          kind: result.result.type,
+          text: null,
+          usage: null,
+        });
+      }
+    }
+    return entries;
+  }
+
+  function mapBatchResults(
+    entries: BatchResultEntry[],
+  ): Map<string, { prediction: Pred | null; usage?: TokenUsage; error?: string }> {
+    const out = new Map<string, { prediction: Pred | null; usage?: TokenUsage; error?: string }>();
+    for (const e of entries) {
+      if (e.kind !== 'succeeded' || e.text === null) {
+        out.set(e.custom_id, {
+          prediction: null,
+          ...(e.usage !== null ? { usage: e.usage } : {}),
+          error: `batch result: ${e.kind}`,
+        });
+        continue;
+      }
+      try {
+        const parsed = opts.schema.safeParse(JSON.parse(e.text));
+        if (!parsed.success) {
+          out.set(e.custom_id, {
+            prediction: null,
+            ...(e.usage !== null ? { usage: e.usage } : {}),
+            error: `schema validation failed: ${parsed.error.message.slice(0, 200)}`,
+          });
+        } else {
+          out.set(e.custom_id, {
+            prediction: parsed.data as Pred,
+            ...(e.usage !== null ? { usage: e.usage } : {}),
+          });
+        }
+      } catch {
+        out.set(e.custom_id, {
+          prediction: null,
+          ...(e.usage !== null ? { usage: e.usage } : {}),
+          error: 'schema: result was not valid JSON',
+        });
+      }
+    }
+    return out;
+  }
+
+  return {
+    batch: async (targets, corpus) => {
+      const entries = await runBatch(buildBatchRequests(targets, corpus));
+      return mapBatchResults(entries);
+    },
+  };
+}
