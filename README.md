@@ -119,26 +119,31 @@ npx goldgate label --config goldgate.config.ts --split dev
 npx goldgate eval --config goldgate.config.ts --split dev --extractor keyword
 ```
 
-`eval` writes `work/runs/<run-id>/report.md` and `results.json`. With this quickstart corpus and config, the report looks like:
+`eval` writes `work/runs/<run-id>/report.md` and `results.json`. Following the unassisted labeling flow shown above (no `--assist` flag), the report looks like:
 
 ```
-# Eval run 2026-07-02-15-03-keyword-dev
+# Eval run 2026-07-02-19-14-keyword-dev
 
 Tokens: 0 in / 0 out · mean latency 0ms/item
 
 ## Threshold ≥ low
 
-Pooled (bug+feature): precision 100.0% (Wilson95 lower 43.8%, n=3) · recall 100.0% · negative-kind FP rate (random stratum) 0.0% · structured fields 100.0% (2 comparisons) · errored items: 0
+Pooled (bug+feature): precision 100.0% (Wilson95 lower 43.8%, n=3) · recall 100.0% · negative-kind FP rate (random stratum) 0.0% · structured fields 0.0% (2 comparisons) · errored items: 0
 
 Gate: FAIL
-- undersized denominator: 3 pooled predicted positives < 40 — label more and re-seal before evaluating
+- undersized denominator: 3 pooled predicted positives < 40 — label more and re-seal before evaluating (spec §3.5)
 - Wilson 95% lower bound 0.438 < 0.8
+- structured-field exact match 0.000 < 0.85
 
 | kind | tp | fp | fn | precision | Wilson95↓ | recall | f1 |
 |---|---|---|---|---|---|---|---|
 | note | 2 | 0 | 0 | 100.0% | 34.2% | 100.0% | 100.0% |
 | bug | 2 | 0 | 0 | 100.0% | 34.2% | 100.0% | 100.0% |
 | feature | 1 | 0 | 0 | 100.0% | 20.7% | 100.0% | 100.0% |
+
+Field mismatches (human review):
+- t-006 component: gold="core" predicted="(absent)"
+- t-001 component: gold="core" predicted="(absent)"
 
 ## Calibration (self-reported confidence vs observed precision)
 
@@ -147,6 +152,8 @@ Gate: FAIL
 | high | 3 | 3 | 100.0% |
 | low | 0 | 0 | 0.0% |
 ```
+
+The gate **fails—correctly.** Five labeled items cannot clear a release gate that demands 40+ pooled predictions and a Wilson lower bound of 0.80: a toy eval should not pass a production gate. That refusal is the feature. And the 0% structured-field score is the harness catching a real gap: the keyword extractor never predicts a `component`, so every comparison against your hand-labeled `"core"` mismatches.
 
 Once the dev configuration is frozen, evaluate the sealed holdout **once**: `npx goldgate eval --config goldgate.config.ts --split holdout --extractor keyword`. That single run is your gate decision.
 
