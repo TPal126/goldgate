@@ -51,7 +51,7 @@ Every metric below is computed only over **scored** items — items the extracto
 
 ### 3.1 Per-kind and pooled, always with intervals
 
-For each kind the report gives true/false positives and negatives, precision, recall, F1 — and the **Wilson 95% lower bound** on precision. The decisive number is the **pooled** precision/recall, micro-averaged across your `gatedKinds`, because at realistic corpus sizes per-kind denominators are too small for stable point estimates; per-kind figures are advisory detail, pooled is the gate input.
+For each kind the report gives true positives, false positives, and false negatives, precision, recall, F1 — and the **Wilson 95% lower bound** on precision. The decisive number is the **pooled** precision/recall, micro-averaged across your `gatedKinds`, because at realistic corpus sizes per-kind denominators are too small for stable point estimates; per-kind figures are advisory detail, pooled is the gate input.
 
 **Every headline proportion carries a Wilson 95% interval and its raw denominator.** A precision of `0.90` computed over 22 predictions is reported as exactly that — `90.0% (Wilson95 lower ~71%, n=22)` — never as a bare `0.90`. The Wilson score interval (rather than a normal approximation) is used because it behaves correctly at small `n` and near the 0/1 boundaries, which is precisely the regime a release decision lives in.
 

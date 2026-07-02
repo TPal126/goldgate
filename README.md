@@ -68,6 +68,7 @@ const triageTask: TaskSpec<Ticket, Gold, Pred> = {
 };
 
 export default defineConfig({
+  defaultModel: 'keyword',  // recorded in run config; any label works for API-free extractors
   task: triageTask,
   // Factory receives { model, effort?, contextWindow }; returns an ExtractFn.
   extractors: {
@@ -86,6 +87,14 @@ export default defineConfig({
     outDir: 'work/runs',
   },
 });
+```
+
+Provision a test corpus file `corpus/tickets.jsonl` with sample items (one per line):
+
+```jsonl
+{"id":"t-001","text":"app crashes when saving","queue":"mobile"}
+{"id":"t-002","text":"please add dark mode support","queue":"ui"}
+{"id":"t-003","text":"login button broken on iOS","queue":"mobile"}
 ```
 
 Then run the three stages (scale the flags down to your corpus — `--total` may not exceed the corpus size, or sampling throws):
@@ -112,7 +121,7 @@ Tokens: 0 in / 0 out · mean latency 0ms/item
 
 ## Threshold ≥ low
 
-Pooled (bug+feature): precision 92.5% (Wilson95 lower 84.1%, n=53) · recall 71.2% ·
+Pooled (bug+feature): precision 92.5% (Wilson95 lower 82.1%, n=53) · recall 71.2% ·
 negative-kind FP rate (random stratum) 3.4% · structured fields 88.0% (25 comparisons) · errored items: 0
 
 Gate: PASS
@@ -197,11 +206,11 @@ const claudeBatch = ({ model }: { model: string }) =>
   createClaudeBatch({ schema, systemPrompt: '…', renderInput: (i) => i.target.text, model, contextWindow: 10 });
 ```
 
-Run batch mode with `npx goldgate eval … --extractor claudeBatch --mode batch`. A non-`end_turn` stop or a null parse surfaces as a thrown error, so the runner records it as an *errored item* (visible in the report) rather than fabricating a prediction. `schemaHash(schema)` gives a stable digest of the compiled output format for your `task.configHashes`, and `ANTHROPIC_PRICES` is a starter price table you can pass through the config's `costPer1MTokens` so the report prints estimated dollar cost.
+Run batch mode with `npx goldgate eval … --extractor claudeBatch --mode batch`. In sync extraction, a non-`end_turn` stop or null parse throws and the runner records it as an *errored item* (visible in the report); in batch mode, non-succeeded results and schema-invalid outputs are marked as errored entries. Both paths end as errored items in the report, never silently dropped. `schemaHash(schema)` gives a stable digest of the compiled output format for your `task.configHashes`, and `ANTHROPIC_PRICES` is a starter price table you can pass through the config's `costPer1MTokens` so the report prints estimated dollar cost.
 
 ## Case study
 
-goldgate was built for and extracted from a production communications-extraction pipeline — an LLM layer that types real, messy workplace messages into decisions, commitments, risks, and status updates. That project needed to convert "the model is good enough" from an assertion into a defensible number, which is where the sealed-holdout / blind-labeling / Wilson-bound-gate protocol comes from. The generic harness was carved out of it and migrated with numeric-equivalence verification: the extracted code reproduces the original pipeline's eval numbers exactly, so the abstraction is known to be behavior-preserving, not merely plausible.
+goldgate was built for and extracted from a production communications-extraction pipeline — an LLM layer that types real, messy workplace messages into decisions, commitments, risks, and status updates. That project needed to convert "the model is good enough" from an assertion into a defensible number, which is where the sealed-holdout / blind-labeling / Wilson-bound-gate protocol comes from. The generic harness was carved out of it and migrated with numeric-equivalence verification: During the migration, the original pipeline's pinned reference evals — a deterministic fixture corpus with recorded predictions — were re-run through goldgate's scoring path at every refactor step; every metric matched the pre-extraction numbers exactly.
 
 ## License
 
