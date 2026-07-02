@@ -1,0 +1,32 @@
+{
+  "name": "goldgate",
+  "version": "0.1.0",
+  "description": "Statistically-gated eval harness for LLM classification/extraction tasks — sealed holdouts, blind labeling, Wilson-bound release gates.",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/TPal126/goldgate.git" },
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "bin": { "goldgate": "./dist/cli.js" },
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./anthropic": { "types": "./dist/anthropic/index.d.ts", "import": "./dist/anthropic/index.js" }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": { "jiti": "^2.4.0" },
+  "peerDependencies": { "@anthropic-ai/sdk": ">=0.100.0", "zod": ">=3.25.0" },
+  "peerDependenciesMeta": { "@anthropic-ai/sdk": { "optional": true }, "zod": { "optional": true } },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.104.1",
+    "@types/node": "^20.11.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.4.0",
+    "zod": "^4.4.3"
+  }
+}
