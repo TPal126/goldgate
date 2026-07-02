@@ -1,5 +1,5 @@
-// Generic labeling machinery (spec §3.3, restructured around TaskSpec
-// seams for Phase 3's goldgate harness). Dev split: optional model
+// Generic labeling machinery, restructured around TaskSpec seams for the
+// goldgate harness. Dev split: optional model
 // assistance (--assist). Holdout split: blind by construction —
 // assistance refused. Appends to the label file after every item
 // (crash-safe). Interactive control flow lives here; `LabelIO` (a single
@@ -26,7 +26,7 @@ export function pendingItems<I extends { id: string; text: string }, G, P>(
 
 export function assertAssistAllowed(split: 'dev' | 'holdout', assist: boolean): void {
   if (split === 'holdout' && assist) {
-    throw new Error('holdout labeling is blind (spec §3.3): --assist is not allowed with --split holdout');
+    throw new Error('holdout labeling is blind: --assist is not allowed with --split holdout');
   }
 }
 

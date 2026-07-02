@@ -131,7 +131,7 @@ Tokens: 0 in / 0 out · mean latency 0ms/item
 Pooled (bug+feature): precision 100.0% (Wilson95 lower 43.8%, n=3) · recall 100.0% · negative-kind FP rate (random stratum) 0.0% · structured fields 0.0% (2 comparisons) · errored items: 0
 
 Gate: FAIL
-- undersized denominator: 3 pooled predicted positives < 40 — label more and re-seal before evaluating (spec §3.5)
+- undersized denominator: 3 pooled predicted positives < 40 — label more and re-seal before evaluating
 - Wilson 95% lower bound 0.438 < 0.8
 - structured-field exact match 0.000 < 0.85
 

@@ -1,9 +1,8 @@
-// The generic contract (spec "The generic contract"): everything
-// task-specific lives in one TaskSpec object; sample/metrics/runner/
-// label/report are parameterized by it. Gold and Pred are entirely
-// task-shaped — the harness reads them only through accessors, which is
-// what lets attune's committed labels (keyed messageId) migrate with zero
-// data changes.
+// The generic contract: everything task-specific lives in one TaskSpec
+// object; sample/metrics/runner/label/report are parameterized by it. Gold
+// and Pred are entirely task-shaped — the harness reads them only through
+// accessors, which is what lets committed labels from the source pipeline
+// (keyed by message id) migrate with zero data changes.
 
 export interface TokenUsage {
   inputTokens: number;
@@ -34,7 +33,7 @@ export interface LabelIO {
 export type ExtractFn<Item, Pred> = (input: { target: Item; context: Item[] }) =>
   Promise<{ prediction: Pred; usage?: TokenUsage }>;
 
-// Batch variant (spec Amendment 2): one call sees all targets up front —
+// Batch variant: one call sees all targets up front —
 // how the Anthropic Batches API works. Keyed by Item.id.
 export interface BatchExtractor<Item, Pred> {
   batch(targets: Item[], corpus: Item[]): Promise<Map<string, {

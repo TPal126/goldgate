@@ -73,7 +73,7 @@ describe('runEval', () => {
     expect(results.config.promptHash).toMatch(/^[0-9a-f]{64}$/);
     expect(results.config.split).toBe('dev');
     // Provenance: effort + mode are recorded so two runs are only
-    // comparable when reasoning depth and execution path match (spec §3.4).
+    // comparable when reasoning depth and execution path match.
     expect(results.config.effort).toBe('high');
     expect(results.config.mode).toBe('sync');
     const report = readFileSync(join(outDir, 'test-run', 'report.md'), 'utf8');
@@ -110,6 +110,25 @@ describe('runEval', () => {
       contextWindow: 0, mode: 'batch', outDir, runId: 'batch-run', concurrency: 1,
     });
     expect(summary.items.every((i) => i.predicted !== null)).toBe(true);
+  });
+
+  it('records mode "batch" from the extractor shape even when opts.mode is omitted', async () => {
+    const outDir = freshOutDir();
+    const batchExtractor = {
+      batch: async (targets: Ticket[]) => new Map(targets.map((t) => [
+        t.id, { prediction: { kind: 'note', certainty: 'high' } as TriagePred },
+      ])),
+    };
+    await runEval({
+      task: triageTask,
+      corpus, labels, sample, split: 'dev',
+      // mode intentionally omitted: the recorded mode must derive from the
+      // batch-shaped extractor, not from a caller-supplied opts.mode.
+      extractor: batchExtractor, extractorName: 'batch-stub', model: 'stub-model',
+      contextWindow: 0, outDir, runId: 'batch-run-implicit', concurrency: 1,
+    });
+    const results = JSON.parse(readFileSync(join(outDir, 'batch-run-implicit', 'results.json'), 'utf8'));
+    expect(results.config.mode).toBe('batch');
   });
 
   it('prints the frozen-config warning on a clean holdout run', async () => {

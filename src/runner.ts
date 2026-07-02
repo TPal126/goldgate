@@ -20,8 +20,11 @@ export interface RunOptions<I extends { id: string; text: string }, G, P> {
   extractorName: string;       // 'claude' | 'heuristic' | 'stub'
   model: string;               // model id or 'heuristic'
   contextWindow: number;       // 0 = --no-context
-  // Recorded in the run config (spec §3.4) so two runs are only comparable
-  // when these match. effort/mode are '(n/a)'/'sync' when omitted.
+  // Recorded in the run config so two runs are only comparable when these
+  // match. effort is '(n/a)' when omitted. mode is accepted here for
+  // backward compatibility, but the value actually recorded is derived
+  // from the extractor's shape (batch vs sync) — see the config object
+  // built below — not read back from this field.
   effort?: string;
   mode?: string;               // 'sync' | 'batch'
   outDir: string;
@@ -50,12 +53,12 @@ export async function runEval<I extends { id: string; text: string }, G, P>(
   const work = sampledForSplit.filter(
     (s) => labelById.has(s.itemId) && byId.has(s.itemId),
   );
-  // No silent truncation (spec §3.4): sampled items lacking a label or a
-  // corpus message are skipped, and the skip count is recorded in config.
+  // No silent truncation: sampled items lacking a label or a corpus
+  // message are skipped, and the skip count is recorded in config.
   const itemsSkipped = sampledForSplit.length - work.length;
 
-  // Holdout guard (spec §3.5 protocol): the holdout must be blind-labeled.
-  // Refuse before any extraction runs if any in-scope label is 'assisted'.
+  // Holdout guard: the holdout must be blind-labeled. Refuse before any
+  // extraction runs if any in-scope label is 'assisted'.
   if (opts.split === 'holdout') {
     const assisted = work.filter((s) => opts.task.provenanceOfGold(labelById.get(s.itemId)!) === 'assisted');
     if (assisted.length > 0) {
@@ -162,7 +165,9 @@ export async function runEval<I extends { id: string; text: string }, G, P>(
     model: opts.model,
     contextWindow: opts.contextWindow,
     effort: opts.effort ?? '(n/a)',
-    mode: opts.mode ?? 'sync',
+    // Derived from the actual dispatch, not opts.mode: what got recorded
+    // must match what actually ran.
+    mode: isBatchExtractor(opts.extractor) ? 'batch' : 'sync',
     itemCount: items.length,
     itemsSampledForSplit: sampledForSplit.length,
     itemsSkipped,

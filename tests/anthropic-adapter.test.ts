@@ -1,5 +1,5 @@
-// Mocked-SDK tests for the goldgate/anthropic adapter (spec Phase 3 lift,
-// Task 15). @anthropic-ai/sdk's default export is mocked; the pure
+// Mocked-SDK tests for the goldgate/anthropic adapter. @anthropic-ai/sdk's
+// default export is mocked; the pure
 // zodOutputFormat helper (no network) is left real. See
 // tests/anthropic-live.test.ts for the (skipped-by-default) live smoke test.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

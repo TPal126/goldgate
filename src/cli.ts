@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // goldgate CLI — sample/label/eval subcommands over a defineConfig'd
 // module (src/config.ts). Every file-path flag is an override with
-// config.paths as the fallback (spec Phase 3 lift).
+// config.paths as the fallback.
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -15,7 +15,7 @@ import { runEval } from './runner.js';
 import { isBatchExtractor } from './task.js';
 import type { ExtractFn, LabelIO } from './task.js';
 
-// --- argv helpers (ported from attune's eval/run.ts + eval/label.ts) ---
+// --- argv helpers (ported from the original implementation) ---
 
 function arg(name: string, fallback?: string): string {
   const i = process.argv.indexOf(`--${name}`);

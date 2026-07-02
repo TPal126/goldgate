@@ -1,7 +1,7 @@
-// Stratified sampling (spec §3.3): a random base plus keyword-boosted
-// oversampling so rare kinds appear in labelable quantity. The dev/holdout
-// split happens HERE, at sampling time, before any labeling or extraction —
-// the holdout stays sealed until dev work is frozen (spec §3.5 protocol).
+// Stratified sampling: a random base plus keyword-boosted oversampling so
+// rare kinds appear in labelable quantity. The dev/holdout split happens
+// HERE, at sampling time, before any labeling or extraction — the holdout
+// stays sealed until dev work is frozen.
 
 export interface SampleItem {
   itemId: string;

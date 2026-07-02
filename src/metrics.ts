@@ -1,18 +1,17 @@
-// packages/extraction/harness/metrics.ts
 import type { TaskSpec, GateThresholds } from './task.js';
 
 export interface EvalItem<Gold, Pred> {
   itemId: string;
   stratum: 'random' | 'boosted';
   gold: Gold;
-  predicted: Pred | null;  // null = errored item (spec §3.4: visible, never silent)
+  predicted: Pred | null;  // null = errored item (visible, never silent)
   error?: string;
 }
 
 type Task<G, P> = TaskSpec<{ id: string; text: string }, G, P>;
 
-// Wilson score interval, lower bound, z=1.96 (95%). Spec §3.4: every
-// headline proportion carries this plus its raw denominator.
+// Wilson score interval, lower bound, z=1.96 (95%). Every headline
+// proportion carries this plus its raw denominator.
 export function wilsonLower(successes: number, n: number, z = 1.96): number {
   if (n === 0) return 0;
   const p = successes / n;
@@ -73,8 +72,7 @@ export interface PooledMetrics {
   errored: number;
 }
 
-// Micro-averaged over the gated kinds (decision/commitment/risk) — the
-// decisive Gate 1 number (spec §3.5 criterion 1–2).
+// Micro-averaged over the gated kinds — the decisive Gate 1 number.
 export function pooledGatedMetrics<G, P>(items: EvalItem<G, P>[], task: Task<G, P>, threshold?: string): PooledMetrics {
   let tp = 0, fp = 0, fn = 0;
   for (const { item, predicted } of scored(items)) {
@@ -197,7 +195,7 @@ export interface GateInput {
 
 export interface GateResult { pass: boolean; reasons: string[] }
 
-// Gate 1 (spec §3.5): all criteria on the holdout, frozen configuration.
+// Gate 1: all criteria on the holdout, frozen configuration.
 export const DEFAULT_GATE: GateThresholds = {
   minPooledPrecision: 0.90,
   minWilsonLower: 0.80,
@@ -212,7 +210,7 @@ export function checkGate<G, P>(g: GateInput, task: Task<G, P>): GateResult {
   const reasons: string[] = [];
   if (g.predictedPositives < t.minPredictedPositives) {
     reasons.push(
-      `undersized denominator: ${g.predictedPositives} pooled predicted positives < ${t.minPredictedPositives} — label more and re-seal before evaluating (spec §3.5)`,
+      `undersized denominator: ${g.predictedPositives} pooled predicted positives < ${t.minPredictedPositives} — label more and re-seal before evaluating`,
     );
   }
   if (g.pooledPrecision < t.minPooledPrecision) {

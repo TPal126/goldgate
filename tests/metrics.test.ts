@@ -41,8 +41,8 @@ describe('wilsonLower', () => {
 
 describe('applyThreshold', () => {
   // triage has only 2 confidence levels (low/high), so there is no
-  // "in-between" demotion case to port from attune's 3-level (low/medium/
-  // high) scenario — RANK: low=0, high=1, so a 'low'-certainty prediction
+  // "in-between" demotion case to port from the source pipeline's 3-level
+  // (low/medium/high) scenario — RANK: low=0, high=1, so a 'low'-certainty prediction
   // is demoted at min='high' and kept at min='low'.
   it('demotes sub-threshold predictions to note', () => {
     expect(task.kindOfPred(pred('bug', 'low'), 'high')).toBe('note');
@@ -53,10 +53,10 @@ describe('applyThreshold', () => {
 
 describe('classification metrics', () => {
   // 10 items: 3 bugs (2 found, 1 missed), 2 features (both found, plus
-  // 1 extra FP from a note), 5 notes (1 misread as a feature). Mirrors
-  // attune's decision/commitment/message scenario 1:1 (decision->bug,
-  // commitment->feature, message->note) so every derived number below is
-  // unchanged from the attune test.
+  // 1 extra FP from a note), 5 notes (1 misread as a feature). Mirrors the
+  // source pipeline's original 3-kind scenario 1:1 (mapped onto triage's
+  // bug/feature/note) so every derived number below is unchanged from
+  // that test.
   const items: EvalItem<TriageGold, TriagePred>[] = [
     item('1', 'bug', 'bug'),
     item('2', 'bug', 'bug'),
@@ -115,8 +115,8 @@ describe('classification metrics', () => {
 
 describe('calibrationTable', () => {
   it('reports observed precision per confidence level', () => {
-    // Same shape as attune's 3-item scenario, but attune only ever
-    // exercised 'high' and 'low' confidences there (never 'medium'), so
+    // Same shape as the source pipeline's 3-item scenario, but it only
+    // ever exercised 'high' and 'low' confidences there (never 'medium'), so
     // dropping to triage's 2-level confidenceLevels changes nothing about
     // the arithmetic: high = {item1 correct, item2 wrong} -> 1/2 = 0.5;
     // low = {item3 correct} -> 1/1 = 1.0.
@@ -139,8 +139,8 @@ describe('field scoring', () => {
 
   it('scores structured fields exact-match on true positives', () => {
     // Only 'bug' has compareFields in triageTask (component structured,
-    // summary freetext), so both items here are bugs (unlike attune's
-    // commitment/risk pair) — each contributes one structured comparison.
+    // summary freetext), so both items here are bugs (unlike the source
+    // pipeline's two-field pair) — each contributes one structured comparison.
     const items: EvalItem<TriageGold, TriagePred>[] = [
       item('1', 'bug', 'bug'), // component matches ('core')
       item('2', 'bug', 'bug'), // component matches ('core')

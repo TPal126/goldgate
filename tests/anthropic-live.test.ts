@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { createClaudeExtractFn } from '../anthropic/index.js';
 
-// Live schema-compilation smoke test (ported from attune's
-// tests/live.test.ts gating pattern). Run explicitly with:
+// Live schema-compilation smoke test (ported from the original
+// implementation's live-test gating pattern). Run explicitly with:
 //   ANTHROPIC_API_KEY=... GOLDGATE_LIVE=1 npm test -- tests/anthropic-live.test.ts
 // Excluded from default runs.
 const live = process.env['ANTHROPIC_API_KEY'] !== undefined && process.env['GOLDGATE_LIVE'] === '1';

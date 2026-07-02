@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { stratifiedSample, mulberry32 } from '../src/sample.js';
 
 // Sampler contracts are task-agnostic (SampleOptions.patterns is a plain
-// RegExp[]), so the toy pattern from the brief stands in for attune's
-// DEFAULT_BOOST_PATTERNS.
+// RegExp[]), so the toy pattern from the brief stands in for the source
+// pipeline's DEFAULT_BOOST_PATTERNS.
 const BOOST_PATTERNS = [/crash/i];
 
 function corpus(n: number): { id: string; text: string }[] {

@@ -1,4 +1,4 @@
-// Config-driven CLI (spec Phase 3 lift): a single defineConfig'd module
+// Config-driven CLI: a single defineConfig'd module
 // wires a task + named extractor factories + default file paths, and the
 // three CLI subcommands (sample/label/eval) load it via jiti so it can be
 // authored in plain TypeScript with no build step of its own.

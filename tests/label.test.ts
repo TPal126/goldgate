@@ -55,14 +55,17 @@ describe('runLabelSession', () => {
       ask: async (_q: string, fallback: string) => answers.shift() ?? fallback,
       say: () => {},
     };
-    await runLabelSession({
-      task: triageTask,
-      corpus: [{ id: 't1', text: 'the app crashes when saving a draft', queue: 'support' }],
-      sample: [{ itemId: 't1', stratum: 'random', split: 'dev' }],
-      existingLabels: [], split: 'dev', out: outFile, io,
-    });
-    const lines = readFileSync(outFile, 'utf8').trim().split('\n');
-    expect(JSON.parse(lines[0]!)).toMatchObject({ ticketId: 't1', kind: 'bug', provenance: 'hand' });
-    rmSync(outFile);
+    try {
+      await runLabelSession({
+        task: triageTask,
+        corpus: [{ id: 't1', text: 'the app crashes when saving a draft', queue: 'support' }],
+        sample: [{ itemId: 't1', stratum: 'random', split: 'dev' }],
+        existingLabels: [], split: 'dev', out: outFile, io,
+      });
+      const lines = readFileSync(outFile, 'utf8').trim().split('\n');
+      expect(JSON.parse(lines[0]!)).toMatchObject({ ticketId: 't1', kind: 'bug', provenance: 'hand' });
+    } finally {
+      rmSync(outFile, { force: true });
+    }
   });
 });

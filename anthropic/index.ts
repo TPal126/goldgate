@@ -1,8 +1,8 @@
-// goldgate's Anthropic (Claude) adapter — a port of attune's
-// src/anthropic-client.ts (sync parse path) and eval/batch.ts (batch
-// mode, expires_at bail-out kept verbatim). @anthropic-ai/sdk and zod are
-// optional peers; this module is the ONLY place in goldgate that imports
-// them — the core (src/) never does.
+// goldgate's Anthropic (Claude) adapter — ported from the original
+// implementation's sync parse path and batch mode (expires_at bail-out
+// kept verbatim). @anthropic-ai/sdk and zod are optional peers; this
+// module is the ONLY place in goldgate that imports them — the core
+// (src/) never does.
 import { createHash } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
@@ -10,21 +10,21 @@ import type { MessageCreateParamsNonStreaming } from '@anthropic-ai/sdk/resource
 import type { ZodType } from 'zod';
 import type { ExtractFn, BatchExtractor, TokenUsage } from '../src/task.js';
 
-// Inlined from attune's src/hash.ts (sha256Hex) — 12 lines, not worth a
-// shared dependency for a single adapter file.
+// Inlined sha256Hex — 12 lines, not worth a shared dependency for a
+// single adapter file.
 function sha256Hex(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
 // Hash of the exact compiled output format sent to the API — recorded in
-// every eval run config (spec §2.3) so schema drift is visible across runs.
+// every eval run config so schema drift is visible across runs.
 export function schemaHash(schema: ZodType): string {
   return sha256Hex(JSON.stringify(zodOutputFormat(schema)));
 }
 
 // Per-MTok USD prices for cost reporting (estimate; actuals from
-// invoices). Pricing stays consumer-side (spec: no pricing in core) — the
-// harness report only prints cost when the caller supplies costPer1MTokens.
+// invoices). Pricing stays consumer-side (by design, no pricing in core) —
+// the harness report only prints cost when the caller supplies costPer1MTokens.
 export const ANTHROPIC_PRICES: Record<string, { in: number; out: number }> = {
   'claude-opus-4-8': { in: 5, out: 25 },
   'claude-sonnet-4-6': { in: 3, out: 15 },
@@ -35,7 +35,7 @@ export interface ClaudeExtractorOptions<Item> {
   /** consumer's Zod schema */
   schema: ZodType;
   systemPrompt: string;
-  /** user-message builder — the attune buildUserMessage seam */
+  /** user-message builder seam */
   renderInput(input: { target: Item; context: Item[] }): string;
   model: string;
   effort?: 'low' | 'medium' | 'high';
@@ -110,7 +110,7 @@ export function createClaudeBatch<Item extends { id: string }, Pred>(
   opts: ClaudeBatchOptions<Item>,
 ): BatchExtractor<Item, Pred> {
   // AutoParseableOutputFormat<T> extends JSONOutputFormat, so this cast is
-  // sound — same cast style as attune's eval/batch.ts.
+  // sound — same cast style as the original implementation's batch module.
   const format = zodOutputFormat(opts.schema) as MessageCreateParamsNonStreaming['output_config'] extends
     { format?: infer F | null } ? NonNullable<F> : never;
 
@@ -139,8 +139,8 @@ export function createClaudeBatch<Item extends { id: string }, Pred>(
 
   // Live execution: create the batch, poll until ended, stream results
   // into BatchResultEntry shape. The expires_at bail-out is kept VERBATIM
-  // from attune's eval/batch.ts runBatch: an unattended run must not poll
-  // forever past the API's 24h batch expiry.
+  // from the original implementation's runBatch: an unattended run must
+  // not poll forever past the API's 24h batch expiry.
   async function runBatch(requests: BatchRequest[]): Promise<BatchResultEntry[]> {
     const client = anthropicClientFor(opts.apiKey);
     const pollIntervalMs = opts.pollIntervalMs ?? 60_000;

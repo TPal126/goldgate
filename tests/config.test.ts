@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-// Barrel-import assertion (spec: Task 17's goldgate.config.ts depends on
-// defineConfig/GoldgateConfig/loadConfig being importable from 'goldgate').
+// Barrel-import assertion: goldgate.config.ts depends on
+// defineConfig/GoldgateConfig/loadConfig being importable from 'goldgate'.
 import { defineConfig } from '../src/index.js';
 import { loadConfig } from '../src/config.js';
 
