@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// goldgate CLI — sample/label/eval subcommands over a defineConfig'd
-// module (src/config.ts). Every file-path flag is an override with
-// config.paths as the fallback.
+// goldgate CLI — sample/label/eval/freeze/status/decide/serve subcommands
+// over a defineConfig'd module (src/config.ts). Every file-path flag is an
+// override with config.paths as the fallback.
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -14,6 +14,13 @@ import { runLabelSession } from './label.js';
 import { runEval } from './runner.js';
 import { isBatchExtractor } from './task.js';
 import type { ExtractFn, LabelIO } from './task.js';
+import {
+  workflowPath, readWorkflow, appendWorkflowEvent, checkHoldoutRun,
+  latestFreeze, holdoutEvalsInRound, buildFreezeEvent, buildDecisionEvent, deriveStatus,
+} from './workflow.js';
+import type { HoldoutVerdict, SplitProgress } from './workflow.js';
+import { listRuns } from './runs.js';
+import { startServer } from './server.js';
 
 // --- argv helpers (ported from the original implementation) ---
 
@@ -130,6 +137,10 @@ async function cmdEval(): Promise<void> {
   const model = arg('model', config.defaultModel);
   const effort = argOpt('effort');
   const contextWindow = flag('no-context') ? 0 : parseInt(arg('context', '10'), 10);
+  if (!Number.isInteger(contextWindow) || contextWindow < 0) {
+    console.error(`--context must be a non-negative integer (got ${arg('context', '10')})`);
+    process.exit(1);
+  }
   const mode = arg('mode', 'sync');
   const concurrency = parseInt(arg('concurrency', '4'), 10);
 
@@ -142,6 +153,28 @@ async function cmdEval(): Promise<void> {
   if (mode === 'batch' && !isBatchExtractor(extractor)) {
     console.error(`extractor '${extractorName}' does not support batch mode`);
     process.exit(1);
+  }
+
+  // The workflow seal, enforced mechanically: a holdout run must match the
+  // frozen configuration (goldgate freeze). --allow-unfrozen proceeds
+  // anyway but the violation is recorded in the event log, visibly.
+  const actualMode = isBatchExtractor(extractor) ? 'batch' as const : 'sync' as const;
+  const wfPath = workflowPath(config.paths);
+  const events = readWorkflow(wfPath);
+  let holdoutVerdict: Extract<HoldoutVerdict, { ok: true }> | null = null;
+  if (split === 'holdout') {
+    const verdict = checkHoldoutRun(events, {
+      extractor: extractorName, model,
+      ...(effort !== undefined ? { effort } : {}),
+      contextWindow, mode: actualMode,
+      ...(config.task.configHashes !== undefined ? { configHashes: config.task.configHashes } : {}),
+    }, flag('allow-unfrozen'));
+    if (!verdict.ok) {
+      for (const r of verdict.reasons) console.error(r);
+      process.exit(1);
+    }
+    for (const w of verdict.warnings) console.warn(w);
+    holdoutVerdict = verdict;
   }
 
   const corpus = readJsonlFile<{ id: string; text: string }>(corpusPath);
@@ -169,6 +202,133 @@ async function cmdEval(): Promise<void> {
   });
   console.log(`done: ${summary.items.length} items, ${summary.pooled.errored} errored`);
   console.log(`report: ${summary.reportPath}`);
+
+  // Gate verdict at the frozen operating threshold when one was declared,
+  // else at the most inclusive block.
+  const frozenThreshold = split === 'holdout' ? latestFreeze(events)?.frozen.threshold : undefined;
+  const block = (frozenThreshold !== undefined
+    ? summary.perThreshold.find((b) => b.threshold === frozenThreshold)
+    : undefined) ?? summary.perThreshold[0];
+  if (block !== undefined) {
+    console.log(`gate @ threshold ${block.threshold ?? '(none)'}: ${block.gate.pass ? 'PASS' : 'FAIL'}`);
+    for (const r of block.gate.reasons) console.log(`  - ${r}`);
+  }
+
+  if (split === 'holdout' && holdoutVerdict !== null) {
+    appendWorkflowEvent(wfPath, {
+      at: new Date().toISOString(), type: 'holdout-eval',
+      round: holdoutVerdict.round, runId, gate: block?.gate ?? null,
+      repeat: holdoutVerdict.repeat,
+      ...(holdoutVerdict.unfrozen ? { unfrozen: true } : {}),
+    });
+  }
+}
+
+async function cmdFreeze(): Promise<void> {
+  const config = await loadConfig(arg('config'));
+  const extractorName = arg('extractor');
+  const model = arg('model', config.defaultModel);
+  const effort = argOpt('effort');
+  const contextWindow = flag('no-context') ? 0 : parseInt(arg('context', '10'), 10);
+  if (!Number.isInteger(contextWindow) || contextWindow < 0) {
+    console.error(`--context must be a non-negative integer (got ${arg('context', '10')})`);
+    process.exit(1);
+  }
+  const threshold = argOpt('threshold');
+  const note = argOpt('note');
+
+  const wfPath = workflowPath(config.paths);
+  const events = readWorkflow(wfPath);
+  const prior = latestFreeze(events);
+  const event = buildFreezeEvent(config, events, {
+    extractor: extractorName, model,
+    ...(effort !== undefined ? { effort } : {}),
+    contextWindow,
+    ...(threshold !== undefined ? { threshold } : {}),
+    ...(note !== undefined ? { note } : {}),
+  }, new Date().toISOString());
+  appendWorkflowEvent(wfPath, event);
+
+  if (prior !== undefined && holdoutEvalsInRound(events, prior.round).length === 0) {
+    console.warn(`round ${prior.round} was frozen but never holdout-evaluated — superseded by round ${event.round}`);
+  }
+  console.log(
+    `frozen (round ${event.round}): ${event.frozen.extractor} / ${event.frozen.model}` +
+    ` · context ${event.frozen.contextWindow} · mode ${event.frozen.mode}` +
+    (event.frozen.effort !== undefined ? ` · effort ${event.frozen.effort}` : '') +
+    (event.frozen.threshold !== undefined ? ` · threshold ≥ ${event.frozen.threshold}` : ''),
+  );
+  console.log('holdout is now evaluable with exactly this configuration: goldgate eval --split holdout');
+}
+
+async function cmdStatus(): Promise<void> {
+  const config = await loadConfig(arg('config'));
+  const samplePath = argOpt('sample') ?? config.paths.sample;
+  const labelsPath = argOpt('labels') ?? config.paths.labels;
+  const sample = existsSync(samplePath) ? readJsonlFile<SampleItem>(samplePath) : [];
+  const labels = existsSync(labelsPath) ? readJsonlFile<unknown>(labelsPath) : [];
+  const events = readWorkflow(workflowPath(config.paths));
+  const status = deriveStatus({ events, sample, labels, task: config.task });
+
+  const bar = (p: SplitProgress): string =>
+    `${p.labeled}/${p.total} labeled (${p.hand} hand, ${p.assisted} assisted), ${p.pending} pending`;
+  console.log(`stage: ${status.stage}   round: ${status.round}`);
+  console.log(`dev:     ${bar(status.dev)}`);
+  console.log(`holdout: ${bar(status.holdout)}`);
+  if (status.frozen !== null) {
+    const f = status.frozen;
+    console.log(
+      `frozen @ ${f.at}: ${f.extractor} / ${f.model} · context ${f.contextWindow} · mode ${f.mode}` +
+      (f.threshold !== undefined ? ` · threshold ≥ ${f.threshold}` : ''),
+    );
+    console.log(`holdout evals this round: ${status.holdoutEvalsThisRound}`);
+  }
+  if (status.decision !== null) {
+    console.log(
+      `decision: ${status.decision.ship ? 'SHIP' : 'NO-SHIP'} @ ${status.decision.at}` +
+      (status.decision.runId !== undefined ? ` (run ${status.decision.runId})` : ''),
+    );
+  }
+  const { runs } = listRuns(config.paths.outDir);
+  if (runs.length > 0) {
+    const pctOf = (x: number): string => (x * 100).toFixed(1) + '%';
+    console.log('\nlatest runs:');
+    for (const r of runs.slice(0, 5)) {
+      const t0 = r.thresholds[0];
+      console.log(`  ${r.runId}  ${r.split}  ` + (t0 === undefined ? '(no metrics)' :
+        `${t0.pass ? 'PASS' : 'FAIL'} precision ${pctOf(t0.precision)} (Wilson95↓ ${pctOf(t0.precisionWilsonLower)}, n=${t0.predictedPositives}) recall ${pctOf(t0.recall)}`));
+    }
+  }
+  console.log(`\nnext: ${status.nextStep}`);
+}
+
+async function cmdDecide(): Promise<void> {
+  const config = await loadConfig(arg('config'));
+  const ship = flag('ship');
+  const noShip = flag('no-ship');
+  if (ship === noShip) {
+    console.error('pass exactly one of --ship / --no-ship');
+    process.exit(1);
+  }
+  const note = argOpt('note');
+  const wfPath = workflowPath(config.paths);
+  const event = buildDecisionEvent(
+    readWorkflow(wfPath),
+    { ship, ...(note !== undefined ? { note } : {}) },
+    new Date().toISOString(),
+  );
+  appendWorkflowEvent(wfPath, event);
+  console.log(`decision recorded: ${ship ? 'SHIP' : 'NO-SHIP'} (round ${event.round ?? '(unfrozen)'}, run ${event.runId})`);
+}
+
+async function cmdServe(): Promise<void> {
+  const configPath = arg('config');
+  const config = await loadConfig(configPath);
+  const port = parseInt(arg('port', '4770'), 10);
+  const host = argOpt('host');
+  const { url } = await startServer({ config, configPath, port, ...(host !== undefined ? { host } : {}) });
+  console.log(`goldgate serve: ${url}`);
+  console.log('workflow overview, run dashboards, and the labeling reviewer are in the browser · Ctrl-C to stop');
 }
 
 async function main(): Promise<void> {
@@ -176,7 +336,11 @@ async function main(): Promise<void> {
   if (sub === 'sample') return cmdSample();
   if (sub === 'label') return cmdLabel();
   if (sub === 'eval') return cmdEval();
-  console.error('usage: goldgate <sample|label|eval> --config <path> [...]');
+  if (sub === 'freeze') return cmdFreeze();
+  if (sub === 'status') return cmdStatus();
+  if (sub === 'decide') return cmdDecide();
+  if (sub === 'serve') return cmdServe();
+  console.error('usage: goldgate <sample|label|eval|freeze|status|decide|serve> --config <path> [...]');
   process.exit(2);
 }
 

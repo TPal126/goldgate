@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { provenanceFor, pendingItems, assertAssistAllowed, kindForKey, runLabelSession } from '../src/label.js';
 import type { SampleItem } from '../src/sample.js';
+import type { LabelPrompt } from '../src/task.js';
 import { triageTask, type TriageGold } from './fixtures/triage-task.js';
 
 describe('kindForKey', () => {
@@ -43,6 +44,40 @@ describe('assertAssistAllowed', () => {
     expect(() => assertAssistAllowed('holdout', true)).toThrow(/blind/i);
     expect(() => assertAssistAllowed('dev', true)).not.toThrow();
     expect(() => assertAssistAllowed('holdout', false)).not.toThrow();
+  });
+});
+
+describe('runLabelSession with a structured askKind IO', () => {
+  it('passes a structured prompt, suppresses item say lines, and still routes field asks through ask()', async () => {
+    const outFile = join(tmpdir(), `goldgate-label-askkind-${process.pid}.jsonl`);
+    const prompts: LabelPrompt[] = [];
+    const sayLines: string[] = [];
+    const askAnswers = ['ui'];
+    const io = {
+      say: (l: string) => { sayLines.push(l); },
+      ask: async (_q: string, fallback: string) => askAnswers.shift() ?? fallback,
+      askKind: async (p: LabelPrompt) => { prompts.push(p); return '2'; },   // kinds[1] = 'bug'
+    };
+    try {
+      await runLabelSession({
+        task: triageTask,
+        corpus: [{ id: 't1', text: 'the app crashes when saving a draft', queue: 'support' }],
+        sample: [{ itemId: 't1', stratum: 'random', split: 'dev' }],
+        existingLabels: [], split: 'dev', out: outFile, io,
+      });
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0]).toMatchObject({
+        itemId: 't1', index: 1, total: 1, stratum: 'random',
+        kinds: ['note', 'bug', 'feature'], proposal: null,
+      });
+      expect(prompts[0]!.rendered).toContain('crashes');
+      // the structured prompt carries the item display — no '---' header says
+      expect(sayLines.filter((l) => l.includes('---'))).toHaveLength(0);
+      const lines = readFileSync(outFile, 'utf8').trim().split('\n');
+      expect(JSON.parse(lines[0]!)).toMatchObject({ ticketId: 't1', kind: 'bug', component: 'ui', provenance: 'hand' });
+    } finally {
+      rmSync(outFile, { force: true });
+    }
   });
 });
 
