@@ -88,10 +88,14 @@ export async function runLabelSession<I extends { id: string; text: string }, G,
       continue;
     }
 
-    io.say(`\n--- ${idx + 1}/${total} [${item.stratum}] ${item.itemId} ---`);
-
     const context = task.context?.(corpus, target, contextWindow) ?? [];
-    io.say(labeling.renderItem?.(target, context) ?? '>>> ' + target.text);
+    const rendered = labeling.renderItem?.(target, context) ?? '>>> ' + target.text;
+    // With a structured askKind, the prompt object carries the item display;
+    // the say lines would only duplicate it in the transcript.
+    if (io.askKind === undefined) {
+      io.say(`\n--- ${idx + 1}/${total} [${item.stratum}] ${item.itemId} ---`);
+      io.say(rendered);
+    }
 
     // Attempt extraction if assist
     let proposal: P | null = null;
@@ -99,13 +103,18 @@ export async function runLabelSession<I extends { id: string; text: string }, G,
       try {
         const result = await assist({ target, context });
         proposal = result.prediction;
-        io.say(`proposal: ${JSON.stringify(proposal)}`);
+        if (io.askKind === undefined) io.say(`proposal: ${JSON.stringify(proposal)}`);
       } catch {
         io.say('proposal: (extraction failed)');
       }
     }
 
-    const key = await io.ask(menuLine(task.kinds, proposal !== null), 'k');
+    const key = io.askKind !== undefined
+      ? await io.askKind({
+          itemId: item.itemId, index: idx + 1, total, stratum: item.stratum,
+          target, context, rendered, kinds: task.kinds, proposal,
+        })
+      : await io.ask(menuLine(task.kinds, proposal !== null), 'k');
 
     if (key === 'q') break;
     if (key === 'k') continue;

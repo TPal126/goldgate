@@ -21,7 +21,9 @@ export interface GoldgateConfig<
   task: TaskSpec<I, G, P>;
   /** name → factory; CLI flags flow in. */
   extractors: Record<string, (opts: { model: string; effort?: string; contextWindow: number }) => TaskExtractor<I, P>>;
-  paths: { corpus: string; labels: string; sample: string; outDir: string };
+  /** workflow (optional) is the append-only protocol event log; defaults
+   *  to a `workflow.jsonl` sibling of the sample file. */
+  paths: { corpus: string; labels: string; sample: string; outDir: string; workflow?: string };
   defaultModel?: string;
   costPer1MTokens?: Record<string, { in: number; out: number }>;
 }

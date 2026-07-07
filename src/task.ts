@@ -25,9 +25,29 @@ export interface GateThresholds {
   minStructuredExactMatch: number;
 }
 
+/** Everything a UI needs to render one item's kind decision — handed to
+ *  LabelIO.askKind so non-terminal frontends (goldgate serve) never have to
+ *  parse the say/ask text stream. */
+export interface LabelPrompt {
+  itemId: string;
+  index: number;   // 1-based position within this session
+  total: number;
+  stratum: string;
+  target: { id: string; text: string };
+  context: { id: string; text: string }[];
+  rendered: string;          // labeling.renderItem?.() ?? '>>> ' + text
+  kinds: readonly string[];
+  proposal: unknown;         // null = no assist, or extraction failed
+}
+
 export interface LabelIO {
   ask(question: string, fallback: string): Promise<string>;
   say(line: string): void;
+  /** Structured alternative to the ask(menuLine(...)) key prompt. When
+   *  present, the session suppresses the item-display say lines and calls
+   *  this instead; it must return the same keys ('1'…'9', 'a', 'k', 'q').
+   *  Field questions still arrive through ask(). */
+  askKind?(prompt: LabelPrompt): Promise<string>;
 }
 
 export type ExtractFn<Item, Pred> = (input: { target: Item; context: Item[] }) =>

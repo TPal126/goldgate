@@ -81,6 +81,8 @@ Each run writes `report.md` (human) and `results.json` (machine) into a per-run 
 
 All tuning — prompt iteration, model choice, effort, confidence threshold, field-normalization — happens on the **dev set.** When dev work is frozen (the choices written down first), the harness runs **once** against the sealed holdout with that frozen configuration. That single run is the gate decision. The runner enforces the seal at eval time: a holdout run **refuses** if any in-scope label is `assisted`, and it warns that results are comparable only against the frozen dev configuration. Any subsequent tuning is a declared new round.
 
+"Written down first" is itself mechanical: `goldgate freeze` records the dev choices (extractor, model, effort, context, mode, operating threshold, config hashes) as an event in an append-only workflow log, and `eval --split holdout` **refuses to run** with no freeze on record or with any drift from the frozen configuration (`--allow-unfrozen` proceeds but records the violation). Each freeze begins a numbered round; repeat holdout evals within a round are recorded with a `repeat` flag and warned about, and the release decision (`goldgate decide`) must reference the round's gate run. The log — every freeze, every holdout eval with its gate verdict, every decision — is the audit trail for the protocol: how many times the holdout was touched is a recorded fact, not a recollection.
+
 ### 4.2 Criteria
 
 The gate pools over `gatedKinds` and checks each criterion against `DEFAULT_GATE` (overridable per criterion via `task.gate`):

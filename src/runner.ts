@@ -9,6 +9,7 @@ import {
   type PooledMetrics,
 } from './metrics.js';
 import { renderReport } from './report.js';
+import type { ThresholdBlock } from './report.js';
 
 export interface RunOptions<I extends { id: string; text: string }, G, P> {
   task: TaskSpec<I, G, P>;
@@ -40,6 +41,7 @@ export interface RunOptions<I extends { id: string; text: string }, G, P> {
 export interface RunSummary<G, P> {
   items: EvalItem<G, P>[];
   pooled: PooledMetrics;       // at thresholds[0] (most inclusive)
+  perThreshold: ThresholdBlock[];  // full metric blocks, one per threshold
   totalUsage: TokenUsage;
   reportPath: string;
 }
@@ -192,5 +194,5 @@ export async function runEval<I extends { id: string; text: string }, G, P>(
     },
   ), 'utf8');
 
-  return { items, pooled: pooledGatedMetrics(items, opts.task, thresholds[0]), totalUsage, reportPath };
+  return { items, pooled: pooledGatedMetrics(items, opts.task, thresholds[0]), perThreshold, totalUsage, reportPath };
 }

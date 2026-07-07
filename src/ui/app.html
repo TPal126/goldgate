@@ -1,0 +1,1120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>goldgate</title>
+<style>
+  /* Design tokens — validated reference palette (dataviz), light + dark. */
+  :root {
+    --surface-1: #fcfcfb;         /* chart/card surface */
+    --page: #f9f9f7;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --series-1: #2a78d6;          /* blue — accent / holdout / hand */
+    --series-2: #1baf7a;          /* aqua — assisted */
+    --de-emph: #898781;           /* context series (dev) */
+    --good: #0ca30c;
+    --critical: #d03b3b;
+    --warning: #fab219;
+    --band: rgba(42,120,214,0.10);
+    --wash: rgba(11,11,11,0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-1: #1a1a19;
+      --page: #0d0d0d;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255,255,255,0.10);
+      --series-1: #3987e5;
+      --series-2: #199e70;
+      --band: rgba(57,135,229,0.12);
+      --wash: rgba(255,255,255,0.06);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--page); color: var(--ink);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  a { color: var(--series-1); }
+  .wrap { max-width: 1160px; margin: 0 auto; padding: 20px 24px 64px; }
+  header.top { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+  header.top h1 { font-size: 20px; margin: 0; letter-spacing: 0.2px; }
+  header.top .cfg { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  nav.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--grid); margin: 10px 0 20px; }
+  nav.tabs button {
+    appearance: none; background: none; border: none; color: var(--ink-2);
+    font: inherit; padding: 8px 14px; cursor: pointer; border-bottom: 2px solid transparent;
+  }
+  nav.tabs button:hover { color: var(--ink); background: var(--wash); }
+  nav.tabs button.on { color: var(--ink); border-bottom-color: var(--series-1); font-weight: 600; }
+  .cards { display: grid; gap: 16px; }
+  .row { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px 18px;
+  }
+  .card h2 { font-size: 13px; font-weight: 600; color: var(--ink-2); margin: 0 0 12px; letter-spacing: 0.2px; }
+  .card h2 .sub { color: var(--muted); font-weight: 400; }
+  .empty { color: var(--muted); padding: 8px 0; }
+  .err-banner { border-color: var(--critical); color: var(--ink); }
+
+  /* stat tiles */
+  .tile .label { color: var(--ink-2); font-size: 13px; }
+  .tile .value { font-size: 30px; font-weight: 600; margin: 2px 0; }
+  .tile .delta { font-size: 12px; color: var(--muted); }
+  .tile .value .unit { font-size: 16px; color: var(--ink-2); font-weight: 400; }
+
+  /* chips */
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px;
+    border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--ink-2);
+    white-space: nowrap;
+  }
+  .chip .ic { font-weight: 700; }
+  .chip.pass .ic { color: var(--good); }
+  .chip.fail .ic { color: var(--critical); }
+  .chip.warn .ic { color: var(--warning); }
+
+  /* meters (stacked progress) */
+  .meter { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--grid); }
+  .meter .seg { height: 100%; }
+  .meter .seg + .seg { margin-left: 2px; }  /* 2px surface gap */
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--ink-2); }
+  .legend .k { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .legend .ln { width: 14px; height: 2px; border-radius: 1px; display: inline-block; }
+
+  /* pipeline */
+  .pipe { display: flex; align-items: flex-start; gap: 0; overflow-x: auto; padding: 4px 0 8px; }
+  .pipe .step { display: flex; flex-direction: column; align-items: center; min-width: 96px; gap: 6px; flex: 1; }
+  .pipe .dot {
+    width: 14px; height: 14px; border-radius: 50%; background: var(--grid);
+    border: 2px solid var(--baseline); z-index: 1;
+  }
+  .pipe .step.done .dot { background: var(--series-1); border-color: var(--series-1); }
+  .pipe .step.now .dot { background: var(--surface-1); border-color: var(--series-1); box-shadow: 0 0 0 3px var(--band); }
+  .pipe .nm { font-size: 11.5px; color: var(--muted); text-align: center; }
+  .pipe .step.done .nm, .pipe .step.now .nm { color: var(--ink-2); }
+  .pipe .step.now .nm { font-weight: 600; color: var(--ink); }
+  .pipe .bar { height: 2px; background: var(--grid); flex: 1; margin-top: 6px; min-width: 12px; }
+  .pipe .bar.done { background: var(--series-1); }
+
+  /* tables */
+  table.t { border-collapse: collapse; width: 100%; font-size: 13px; }
+  table.t th {
+    text-align: left; color: var(--muted); font-weight: 500; font-size: 12px;
+    border-bottom: 1px solid var(--grid); padding: 5px 10px 5px 0;
+  }
+  table.t td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  table.t tr:last-child td { border-bottom: none; }
+  table.t td.num, table.t th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.t tr.click { cursor: pointer; }
+  table.t tr.click:hover td { background: var(--wash); }
+  .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+  .sub2 { color: var(--muted); font-size: 12px; }
+
+  /* buttons & inputs */
+  button.btn {
+    appearance: none; font: inherit; border-radius: 8px; cursor: pointer; padding: 7px 14px;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--ink);
+  }
+  button.btn:hover { background: var(--wash); }
+  button.btn.pri { background: var(--series-1); border-color: var(--series-1); color: #fff; }
+  button.btn.pri:hover { filter: brightness(1.06); }
+  button.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.kind {
+    appearance: none; font: inherit; cursor: pointer; padding: 8px 14px;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--ink); border-radius: 8px;
+    display: inline-flex; gap: 8px; align-items: center;
+  }
+  button.kind:hover { border-color: var(--series-1); background: var(--wash); }
+  button.kind .key {
+    background: var(--wash); border: 1px solid var(--border); border-radius: 4px;
+    font-size: 11px; padding: 0 5px; color: var(--muted); font-family: ui-monospace, Consolas, monospace;
+  }
+  input.in, select.in, textarea.in {
+    font: inherit; color: var(--ink); background: var(--surface-1);
+    border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; width: 100%;
+  }
+  label.f { display: block; font-size: 12px; color: var(--ink-2); margin: 10px 0 4px; }
+  .frow { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .filters { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+  .filters label { font-size: 12px; color: var(--ink-2); }
+  .filters select { width: auto; }
+
+  /* label review */
+  .itemtext {
+    white-space: pre-wrap; overflow-wrap: anywhere; background: var(--wash);
+    border-radius: 8px; padding: 12px 14px; font-size: 14.5px; margin: 8px 0;
+  }
+  .proposal { border: 1px solid var(--border); border-left: 3px solid var(--series-2); border-radius: 8px; padding: 10px 14px; margin: 10px 0; }
+  .kinds { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+  .transcript { max-height: 180px; overflow: auto; }
+  .pulse { color: var(--muted); animation: pu 1.2s ease-in-out infinite; }
+  @keyframes pu { 50% { opacity: 0.45; } }
+
+  /* charts */
+  .chart-card svg { display: block; width: 100%; height: auto; }
+  #tooltip {
+    position: fixed; pointer-events: none; z-index: 50; display: none;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 11px; font-size: 12.5px; box-shadow: 0 4px 16px rgba(0,0,0,0.14);
+    max-width: 320px;
+  }
+  #tooltip .tt-title { color: var(--muted); font-size: 11.5px; margin-bottom: 4px; }
+  #tooltip .tt-row { display: flex; align-items: center; gap: 7px; }
+  #tooltip .tt-row .ln { width: 12px; height: 2px; display: inline-block; border-radius: 1px; }
+  #tooltip .tt-row b { font-variant-numeric: tabular-nums; }
+  .heat { display: grid; gap: 2px; font-size: 12.5px; }
+  .heat .hcell {
+    border-radius: 4px; text-align: center; padding: 8px 4px; min-width: 52px;
+    font-variant-numeric: tabular-nums; cursor: default;
+  }
+  .heat .hhead { color: var(--muted); font-size: 11.5px; display: flex; align-items: center; justify-content: center; padding: 2px; overflow-wrap: anywhere; }
+  .heat .hrow { color: var(--muted); font-size: 11.5px; display: flex; align-items: center; justify-content: flex-end; padding-right: 6px; overflow-wrap: anywhere; }
+  .cellbar { display: flex; align-items: center; gap: 8px; }
+  .cellbar .track { flex: 1; height: 8px; border-radius: 4px; background: var(--grid); min-width: 60px; }
+  .cellbar .fill { height: 100%; border-radius: 4px; background: var(--series-1); }
+  .cellbar .v { font-variant-numeric: tabular-nums; min-width: 52px; text-align: right; }
+
+  dialog {
+    background: var(--surface-1); color: var(--ink); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px 22px; max-width: 440px; width: calc(100vw - 48px);
+  }
+  dialog::backdrop { background: rgba(0,0,0,0.35); }
+  .dlg-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+  .dlg-err { color: var(--critical); font-size: 12.5px; margin-top: 10px; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .gate-reasons { margin: 6px 0 0; padding-left: 18px; color: var(--ink-2); }
+  .gate-reasons li { margin: 2px 0; }
+  .scroll-x { overflow-x: auto; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>goldgate</h1>
+    <span class="cfg" id="cfgpath"></span>
+  </header>
+  <nav class="tabs" id="tabs"></nav>
+  <div id="view"></div>
+</div>
+<div id="tooltip"></div>
+
+<script>
+'use strict';
+// ---------- palette constants (mirrors the CSS tokens; validated) ----------
+const DARKMODE = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+const C = {
+  s1: DARKMODE ? '#3987e5' : '#2a78d6',
+  s2: DARKMODE ? '#199e70' : '#1baf7a',
+  gray: '#898781',
+  grid: DARKMODE ? '#2c2c2a' : '#e1e0d9',
+  surface: DARKMODE ? '#1a1a19' : '#fcfcfb',
+  baseline: DARKMODE ? '#383835' : '#c3c2b7',
+  muted: '#898781',
+  ink2: DARKMODE ? '#c3c2b7' : '#52514e',
+};
+// Sequential blue ramp; on dark the near-zero end recedes toward the surface.
+const RAMP_LIGHT = ['#cde2fb','#b7d3f6','#9ec5f4','#86b6ef','#6da7ec','#5598e7','#3987e5','#2a78d6','#256abf','#1c5cab','#184f95','#104281','#0d366b'];
+const RAMP = DARKMODE ? [...RAMP_LIGHT].reverse() : RAMP_LIGHT;
+
+// ---------- state ----------
+const S = {
+  tab: 'overview',
+  overview: null,
+  runDetail: null,       // { id, data }
+  selectedRunId: null,
+  runThresholdIdx: 0,
+  trendThreshold: undefined,   // undefined = first available
+  trendExtractor: 'all',
+  label: null,
+  labelDismissed: false,   // "finished" screen dismissed → show the start form
+  fetchError: null,
+  pollTimer: null,
+};
+
+// ---------- dom helpers (all data goes in via textContent — never innerHTML) ----------
+function el(tag, attrs, ...children) {
+  const n = document.createElement(tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) {
+    if (v === undefined || v === null) continue;
+    if (k === 'class') n.className = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else if (k === 'dataset') Object.assign(n.dataset, v);
+    else n.setAttribute(k, String(v));
+  }
+  for (const c of children.flat()) {
+    if (c === null || c === undefined) continue;
+    n.append(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c);
+  }
+  return n;
+}
+const SVGNS = 'http://www.w3.org/2000/svg';
+function sv(tag, attrs, ...children) {
+  const n = document.createElementNS(SVGNS, tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) {
+    if (v === undefined || v === null) continue;
+    if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, String(v));
+  }
+  for (const c of children.flat()) if (c) n.append(c);
+  return n;
+}
+const pct = (x) => (x * 100).toFixed(1) + '%';
+const pct0 = (x) => Math.round(x * 100) + '%';
+function fmtWhen(iso) {
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? String(iso) : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function relLum(hex) {
+  const c = hex.replace('#', '');
+  const f = (i) => {
+    const v = parseInt(c.slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * f(0) + 0.7152 * f(2) + 0.0722 * f(4);
+}
+
+// ---------- tooltip ----------
+const TT = document.getElementById('tooltip');
+function ttShow(x, y, nodes) {
+  TT.replaceChildren(...nodes);
+  TT.style.display = 'block';
+  const pad = 14;
+  const w = TT.offsetWidth, h = TT.offsetHeight;
+  let left = x + pad, top = y + pad;
+  if (left + w > window.innerWidth - 8) left = x - w - pad;
+  if (top + h > window.innerHeight - 8) top = y - h - pad;
+  TT.style.left = Math.max(4, left) + 'px';
+  TT.style.top = Math.max(4, top) + 'px';
+}
+function ttHide() { TT.style.display = 'none'; }
+
+// ---------- api ----------
+async function api(path, opts) {
+  const res = await fetch(path, opts ? {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(opts),
+  } : undefined);
+  let body = null;
+  try { body = await res.json(); } catch { /* non-JSON error */ }
+  if (!res.ok) throw new Error((body && body.error) || (res.status + ' ' + res.statusText));
+  return body;
+}
+async function loadOverview() {
+  try {
+    S.overview = await api('/api/overview');
+    S.fetchError = null;
+  } catch (e) {
+    S.fetchError = e.message;
+  }
+}
+
+// ---------- shared components ----------
+function chip(kindCls, icon, text) {
+  return el('span', { class: 'chip ' + kindCls }, el('span', { class: 'ic' }, icon), text);
+}
+const gateChip = (pass) => pass ? chip('pass', '✓', 'PASS') : chip('fail', '✕', 'FAIL');
+
+function tile(label, value, sub, valueNode) {
+  return el('div', { class: 'card tile' },
+    el('div', { class: 'label' }, label),
+    valueNode ?? el('div', { class: 'value' }, value),
+    sub ? el('div', { class: 'delta' }, sub) : null);
+}
+
+function meter(segments, total, legendItems) {
+  // stacked progress meter: colored segs + track remainder, 2px surface gaps
+  const m = el('div', { class: 'meter' });
+  if (total > 0) {
+    for (const s of segments) {
+      if (s.n <= 0) continue;
+      m.append(el('div', { class: 'seg', style: `width:${(s.n / total * 100).toFixed(2)}%;background:${s.color}` }));
+    }
+  }
+  const wrap = el('div', {}, m);
+  if (legendItems) {
+    wrap.append(el('div', { class: 'legend' },
+      legendItems.map((li) => el('span', { class: 'k' },
+        el('span', { class: 'sw', style: `background:${li.color}` }), li.text))));
+  }
+  return wrap;
+}
+
+// ---------- line chart (trends) ----------
+// series: [{name, color, values: (number|null)[], band: ({lo,hi}|null)[]|null}]
+// xs: [{label, runId, meta}] — one per x position.
+function lineChart(opts) {
+  const W = 720, H = 200, padL = 42, padR = 14, padT = 10, padB = 26;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const n = opts.xs.length;
+  const X = (i) => padL + (n <= 1 ? iw / 2 : (i / (n - 1)) * iw);
+  const Y = (v) => padT + (1 - v) * ih;
+  const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
+
+  // grid + y ticks (0/25/50/75/100%)
+  for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+    svg.append(sv('line', { x1: padL, x2: W - padR, y1: Y(t), y2: Y(t), stroke: C.grid, 'stroke-width': 1 }));
+    const lbl = sv('text', { x: padL - 6, y: Y(t) + 4, 'text-anchor': 'end', fill: C.muted, 'font-size': 10.5 });
+    lbl.textContent = pct0(t);
+    svg.append(lbl);
+  }
+  svg.append(sv('line', { x1: padL, x2: W - padR, y1: Y(0), y2: Y(0), stroke: C.baseline, 'stroke-width': 1 }));
+
+  // x tick labels (sparse)
+  const every = Math.max(1, Math.ceil(n / 6));
+  for (let i = 0; i < n; i++) {
+    if (i % every !== 0 && i !== n - 1) continue;
+    // Anchor the edge labels inward so they never clip at the chart border.
+    const anchor = i === n - 1 ? 'end' : i === 0 ? 'start' : 'middle';
+    const ax = i === n - 1 ? X(i) + 4 : i === 0 ? Math.max(2, X(i) - 20) : X(i);
+    const t = sv('text', { x: ax, y: H - 8, 'text-anchor': anchor, fill: C.muted, 'font-size': 10 });
+    t.textContent = opts.xs[i].label;
+    svg.append(t);
+  }
+
+  for (const s of opts.series) {
+    const pts = [];
+    for (let i = 0; i < n; i++) if (s.values[i] !== null && s.values[i] !== undefined) pts.push([i, s.values[i]]);
+    if (s.band) {
+      const bpts = [];
+      for (let i = 0; i < n; i++) if (s.band[i]) bpts.push([i, s.band[i]]);
+      if (bpts.length >= 2) {
+        const up = bpts.map(([i, b]) => `${X(i)},${Y(b.hi)}`);
+        const dn = [...bpts].reverse().map(([i, b]) => `${X(i)},${Y(b.lo)}`);
+        svg.append(sv('polygon', { points: [...up, ...dn].join(' '), fill: 'var(--band)', stroke: 'none' }));
+      }
+    }
+    if (pts.length >= 2) {
+      svg.append(sv('polyline', {
+        points: pts.map(([i, v]) => `${X(i)},${Y(v)}`).join(' '),
+        fill: 'none', stroke: s.color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+      }));
+    }
+    for (const [i, v] of pts) {
+      svg.append(sv('circle', { cx: X(i), cy: Y(v), r: 4, fill: s.color, stroke: C.surface, 'stroke-width': 2 }));
+    }
+  }
+
+  // crosshair + hover layer
+  const cross = sv('line', { y1: padT, y2: padT + ih, stroke: C.baseline, 'stroke-width': 1, visibility: 'hidden' });
+  svg.append(cross);
+  const overlay = sv('rect', { x: padL, y: padT, width: iw, height: ih, fill: 'transparent', style: 'cursor:pointer' });
+  const nearest = (evt) => {
+    const r = svg.getBoundingClientRect();
+    const px = (evt.clientX - r.left) / r.width * W;
+    return Math.max(0, Math.min(n - 1, Math.round(n <= 1 ? 0 : (px - padL) / iw * (n - 1))));
+  };
+  overlay.addEventListener('pointermove', (evt) => {
+    const i = nearest(evt);
+    cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i));
+    cross.setAttribute('visibility', 'visible');
+    const rows = [el('div', { class: 'tt-title' }, opts.xs[i].label + ' · ' + opts.xs[i].runId)];
+    for (const s of opts.series) {
+      const v = s.values[i];
+      if (v === null || v === undefined) continue;
+      rows.push(el('div', { class: 'tt-row' },
+        el('span', { class: 'ln', style: `background:${s.color}` }),
+        el('b', {}, pct(v)), el('span', { class: 'sub2' }, s.name)));
+      const b = s.band && s.band[i];
+      if (b) rows.push(el('div', { class: 'tt-row sub2' }, `Wilson95↓ ${pct(b.lo)}`));
+    }
+    if (opts.xs[i].meta) rows.push(el('div', { class: 'tt-row sub2' }, opts.xs[i].meta));
+    ttShow(evt.clientX, evt.clientY, rows);
+  });
+  overlay.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); ttHide(); });
+  if (opts.onClick) overlay.addEventListener('click', (evt) => opts.onClick(nearest(evt)));
+  svg.append(overlay);
+  return svg;
+}
+
+function chartLegend(items) {
+  return el('div', { class: 'legend' },
+    items.map((li) => el('span', { class: 'k' }, el('span', { class: 'ln', style: `background:${li.color}` }), li.name)));
+}
+
+// ---------- confusion heatmap ----------
+function heatmap(confusion, kinds) {
+  const max = Math.max(1, ...kinds.flatMap((g) => kinds.map((p) => (confusion[g] && confusion[g][p]) || 0)));
+  const grid = el('div', { class: 'heat', style: `grid-template-columns: minmax(60px,auto) repeat(${kinds.length}, 1fr)` });
+  grid.append(el('div', { class: 'hhead' }, 'gold ↓ / predicted →'));
+  for (const p of kinds) grid.append(el('div', { class: 'hhead' }, p));
+  for (const g of kinds) {
+    grid.append(el('div', { class: 'hrow' }, g));
+    for (const p of kinds) {
+      const v = (confusion[g] && confusion[g][p]) || 0;
+      let cell;
+      if (v === 0) {
+        cell = el('div', { class: 'hcell', style: `border:1px solid ${C.grid};color:${C.muted}` }, '0');
+      } else {
+        const idx = Math.min(RAMP.length - 1, Math.round(Math.sqrt(v / max) * (RAMP.length - 1)));
+        const bg = RAMP[idx];
+        const ink = relLum(bg) > 0.4 ? '#0b0b0b' : '#ffffff';
+        cell = el('div', { class: 'hcell', style: `background:${bg};color:${ink}` }, String(v));
+      }
+      cell.addEventListener('pointermove', (evt) => ttShow(evt.clientX, evt.clientY, [
+        el('div', { class: 'tt-row' }, el('b', {}, String(v)), el('span', { class: 'sub2' }, `gold ${g} → predicted ${p}`)),
+      ]));
+      cell.addEventListener('pointerleave', ttHide);
+      grid.append(cell);
+    }
+  }
+  return grid;
+}
+
+// ---------- tabs / routing ----------
+const TABS = [
+  ['overview', 'Overview'],
+  ['runs', 'Runs'],
+  ['trends', 'Trends'],
+  ['label', 'Label'],
+];
+function setTab(t, runId) {
+  S.tab = t;
+  S.selectedRunId = runId ?? null;
+  S.runDetail = null;
+  location.hash = runId ? `#runs/${encodeURIComponent(runId)}` : '#' + t;
+  render();
+  refresh();
+}
+window.addEventListener('hashchange', () => {
+  const h = location.hash.slice(1);
+  const m = /^runs\/(.+)$/.exec(h);
+  if (m) { S.tab = 'runs'; S.selectedRunId = decodeURIComponent(m[1]); }
+  else if (TABS.some(([k]) => k === h)) { S.tab = h; S.selectedRunId = null; }
+  render(); refresh();
+});
+
+async function refresh() {
+  await loadOverview();
+  if (S.tab === 'runs' && S.selectedRunId && (!S.runDetail || S.runDetail.id !== S.selectedRunId)) {
+    try { S.runDetail = { id: S.selectedRunId, data: await api('/api/runs/' + encodeURIComponent(S.selectedRunId)) }; }
+    catch (e) { S.runDetail = { id: S.selectedRunId, data: null, error: e.message }; }
+  }
+  if (S.tab === 'label') {
+    try { S.label = await api('/api/label/state'); } catch (e) { /* keep last */ }
+  }
+  render();
+  schedulePoll();
+}
+function schedulePoll() {
+  clearTimeout(S.pollTimer);
+  let ms;
+  if (S.tab === 'label') {
+    // On the label tab, poll ONLY while the session is off doing async work
+    // (an assist extraction in flight). When a prompt or field question is
+    // on screen we wait for the reviewer — a background re-render would wipe
+    // half-typed input and revert local UI state — and when the session is
+    // idle or finished there is nothing to poll for; our own POSTs drive it.
+    if (S.label && S.label.active && S.label.working) ms = 900;
+    else return;
+  } else {
+    ms = 12000;
+  }
+  S.pollTimer = setTimeout(refresh, ms);
+}
+
+// ---------- render root ----------
+function render() {
+  document.getElementById('cfgpath').textContent = (S.overview && S.overview.configPath) || '';
+  const tabs = document.getElementById('tabs');
+  tabs.replaceChildren(...TABS.map(([k, name]) =>
+    el('button', { class: S.tab === k ? 'on' : '', onclick: () => setTab(k) }, name)));
+
+  const view = document.getElementById('view');
+  const parts = [];
+  if (S.fetchError) parts.push(el('div', { class: 'card err-banner' }, 'server unreachable: ' + S.fetchError));
+  if (!S.overview) {
+    parts.push(el('div', { class: 'empty' }, 'loading…'));
+    view.replaceChildren(...parts);
+    return;
+  }
+  if (S.overview.skippedRuns && S.overview.skippedRuns.length > 0) {
+    parts.push(el('div', { class: 'card err-banner' },
+      `warning: ${S.overview.skippedRuns.length} run dir(s) had unreadable results.json and are not shown: ` +
+      S.overview.skippedRuns.join(', ')));
+  }
+  if (S.tab === 'overview') parts.push(renderOverview());
+  if (S.tab === 'runs') parts.push(S.selectedRunId ? renderRunDetail() : renderRuns());
+  if (S.tab === 'trends') parts.push(renderTrends());
+  if (S.tab === 'label') parts.push(renderLabel());
+  view.replaceChildren(...parts);
+}
+
+// ---------- overview ----------
+const STAGES = [
+  ['sample', 'Sample'],
+  ['label-dev', 'Label dev'],
+  ['dev', 'Iterate dev'],
+  ['label-holdout', 'Blind-label holdout'],
+  ['holdout-eval', 'Gate eval'],
+  ['decide', 'Decide'],
+  ['done', 'Done'],
+];
+function renderOverview() {
+  const o = S.overview;
+  const wf = o.workflow;
+  const stageIdx = Math.max(0, STAGES.findIndex(([k]) => k === wf.stage));
+
+  // pipeline
+  const pipe = el('div', { class: 'pipe' });
+  STAGES.forEach(([k, nm], i) => {
+    if (i > 0) pipe.append(el('div', { class: 'bar' + (i <= stageIdx ? ' done' : '') }));
+    pipe.append(el('div', { class: 'step' + (i < stageIdx ? ' done' : i === stageIdx ? ' now' : '') },
+      el('div', { class: 'dot' }), el('div', { class: 'nm' }, nm)));
+  });
+
+  const actions = el('div', { class: 'frow', style: 'margin-top:12px' });
+  actions.append(el('button', { class: 'btn', onclick: openFreezeDialog }, 'Freeze configuration…'));
+  if (wf.holdoutEvalsThisRound > 0 && !wf.decision) {
+    actions.append(el('button', { class: 'btn pri', onclick: openDecideDialog }, 'Record decision…'));
+  }
+
+  const wfCard = el('div', { class: 'card' },
+    el('h2', {}, 'Workflow ', el('span', { class: 'sub' }, `· round ${wf.round}`)),
+    pipe,
+    el('div', { class: 'sub2', style: 'margin-top:6px' }, 'next: ' + wf.nextStep),
+    wf.frozen ? el('div', { class: 'sub2', style: 'margin-top:6px' },
+      `frozen @ ${fmtWhen(wf.frozen.at)}: ${wf.frozen.extractor} / ${wf.frozen.model}` +
+      ` · context ${wf.frozen.contextWindow} · mode ${wf.frozen.mode}` +
+      (wf.frozen.threshold ? ` · threshold ≥ ${wf.frozen.threshold}` : '') +
+      ` · holdout evals this round: ${wf.holdoutEvalsThisRound}`) : null,
+    wf.decision ? el('div', { class: 'frow', style: 'margin-top:8px' },
+      wf.decision.ship ? chip('pass', '✓', 'SHIP') : chip('fail', '✕', 'NO-SHIP'),
+      el('span', { class: 'sub2' }, `@ ${fmtWhen(wf.decision.at)}` + (wf.decision.runId ? ` · run ${wf.decision.runId}` : ''))) : null,
+    actions,
+  );
+
+  // label progress
+  const prog = (name, p) => el('div', { style: 'margin-bottom:14px' },
+    el('div', { class: 'frow', style: 'justify-content:space-between;margin-bottom:6px' },
+      el('span', {}, name),
+      el('span', { class: 'sub2' }, `${p.labeled}/${p.total} labeled · ${p.pending} pending`)),
+    meter(
+      [{ n: p.hand, color: C.s1 }, { n: p.assisted, color: C.s2 }], p.total,
+      [{ color: C.s1, text: `hand ${p.hand}` }, { color: C.s2, text: `assisted ${p.assisted}` },
+       { color: C.grid, text: `pending ${p.pending}` }]));
+  const progCard = el('div', { class: 'card' },
+    el('h2', {}, 'Labeling progress'),
+    wf.dev.total + wf.holdout.total === 0
+      ? el('div', { class: 'empty' }, 'no sample yet — run goldgate sample')
+      : el('div', {}, prog('dev', wf.dev), prog('holdout', wf.holdout)));
+
+  // latest gate verdict — prefer the latest holdout run
+  const runs = o.runs || [];
+  const latest = runs.find((r) => r.split === 'holdout') || runs[0];
+  const frozenT = wf.frozen && wf.frozen.threshold !== undefined ? wf.frozen.threshold : undefined;
+  const t = latest && Array.isArray(latest.thresholds)
+    ? ((frozenT !== undefined ? latest.thresholds.find((x) => x.threshold === frozenT) : undefined) || latest.thresholds[0])
+    : undefined;
+  let gateCards;
+  if (latest && t) {
+    gateCards = el('div', { class: 'row' },
+      tile('Gate · ' + latest.split + ' · ' + latest.runId, null,
+        'threshold ' + (t.threshold === null ? '(none)' : '≥ ' + t.threshold),
+        el('div', { class: 'value frow' }, gateChip(t.pass))),
+      tile('Pooled precision', null, `Wilson95↓ ${pct(t.precisionWilsonLower)} · n=${t.predictedPositives}`,
+        el('div', { class: 'value' }, pct(t.precision))),
+      tile('Pooled recall', null, `${latest.itemCount} items · ${latest.errored} errored`,
+        el('div', { class: 'value' }, pct(t.recall))),
+    );
+  } else {
+    gateCards = el('div', { class: 'card' }, el('h2', {}, 'Latest gate'),
+      el('div', { class: 'empty' }, latest ? 'latest run has no metric blocks' : 'no runs yet'));
+  }
+
+  // audit trail
+  const evRows = [...(o.events || [])].reverse().slice(0, 30).map((e) => {
+    let what;
+    if (e.type === 'freeze') {
+      what = el('span', {}, `freeze — round ${e.round}: ${e.frozen.extractor} / ${e.frozen.model}` +
+        (e.frozen.threshold ? ` · threshold ≥ ${e.frozen.threshold}` : '') + (e.note ? ` · “${e.note}”` : ''));
+    } else if (e.type === 'holdout-eval') {
+      what = el('span', { class: 'frow' },
+        `holdout eval — ${e.runId} `,
+        e.gate ? gateChip(e.gate.pass) : null,
+        e.repeat ? chip('warn', '⚠', 'repeat') : null,
+        e.unfrozen ? chip('warn', '⚠', 'unfrozen') : null);
+    } else if (e.type === 'decision') {
+      what = el('span', { class: 'frow' }, 'decision ', e.ship ? chip('pass', '✓', 'SHIP') : chip('fail', '✕', 'NO-SHIP'),
+        e.runId ? el('span', { class: 'sub2' }, ' run ' + e.runId) : null, e.note ? el('span', { class: 'sub2' }, ` “${e.note}”`) : null);
+    } else {
+      what = el('span', {}, e.type);
+    }
+    return el('tr', {}, el('td', { class: 'sub2', style: 'white-space:nowrap' }, fmtWhen(e.at)), el('td', {}, what));
+  });
+  const audit = el('div', { class: 'card' },
+    el('h2', {}, 'Event log ', el('span', { class: 'sub' }, '· append-only audit trail')),
+    evRows.length === 0 ? el('div', { class: 'empty' }, 'no events yet — the log starts with the first freeze or holdout eval')
+      : el('table', { class: 't' }, el('tbody', {}, evRows)));
+
+  return el('div', { class: 'cards' }, wfCard, gateCards, progCard, audit);
+}
+
+// ---------- freeze / decide dialogs ----------
+function openFreezeDialog() {
+  const o = S.overview;
+  const err = el('div', { class: 'dlg-err' });
+  const selEx = el('select', { class: 'in' }, o.extractors.map((x) => el('option', { value: x }, x)));
+  const inModel = el('input', { class: 'in', value: o.defaultModel || '' });
+  const inEffort = el('input', { class: 'in', placeholder: '(none)' });
+  const inCtx = el('input', { class: 'in', type: 'number', value: '10' });
+  const levels = o.task.confidenceLevels || [];
+  const selT = el('select', { class: 'in' },
+    el('option', { value: '' }, '(none)'),
+    levels.map((x) => el('option', { value: x }, x)));
+  const inNote = el('input', { class: 'in', placeholder: 'why this configuration' });
+  const dlg = el('dialog', {},
+    el('h2', {}, 'Freeze the dev configuration'),
+    el('div', { class: 'note' }, 'Starts a new round. The holdout becomes evaluable exactly against this configuration.'),
+    el('label', { class: 'f' }, 'extractor'), selEx,
+    el('label', { class: 'f' }, 'model'), inModel,
+    el('label', { class: 'f' }, 'effort (optional)'), inEffort,
+    el('label', { class: 'f' }, 'context window'), inCtx,
+    levels.length > 0 ? el('label', { class: 'f' }, 'operating threshold') : null,
+    levels.length > 0 ? selT : null,
+    el('label', { class: 'f' }, 'note (optional)'), inNote,
+    err,
+    el('div', { class: 'dlg-actions' },
+      el('button', { class: 'btn', onclick: () => dlg.close() }, 'Cancel'),
+      el('button', { class: 'btn pri', onclick: async () => {
+        try {
+          await api('/api/workflow/freeze', {
+            extractor: selEx.value, model: inModel.value,
+            ...(inEffort.value ? { effort: inEffort.value } : {}),
+            contextWindow: parseInt(inCtx.value || '10', 10),
+            ...(selT.value ? { threshold: selT.value } : {}),
+            ...(inNote.value ? { note: inNote.value } : {}),
+          });
+          dlg.close(); dlg.remove(); refresh();
+        } catch (e) { err.textContent = e.message; }
+      } }, 'Freeze')));
+  document.body.append(dlg);
+  dlg.showModal();
+}
+
+function openDecideDialog() {
+  const err = el('div', { class: 'dlg-err' });
+  const inNote = el('input', { class: 'in', placeholder: 'optional note' });
+  const mk = (ship) => el('button', { class: 'btn' + (ship ? ' pri' : ''), onclick: async () => {
+    try {
+      await api('/api/workflow/decide', { ship, ...(inNote.value ? { note: inNote.value } : {}) });
+      dlg.close(); dlg.remove(); refresh();
+    } catch (e) { err.textContent = e.message; }
+  } }, ship ? 'SHIP' : 'NO-SHIP');
+  const dlg = el('dialog', {},
+    el('h2', {}, 'Record the release decision'),
+    el('div', { class: 'note' }, 'Tied to this round’s latest holdout gate run in the audit log.'),
+    el('label', { class: 'f' }, 'note'), inNote, err,
+    el('div', { class: 'dlg-actions' },
+      el('button', { class: 'btn', onclick: () => { dlg.close(); dlg.remove(); } }, 'Cancel'),
+      mk(false), mk(true)));
+  document.body.append(dlg);
+  dlg.showModal();
+}
+
+// ---------- runs ----------
+function renderRuns() {
+  const runs = (S.overview.runs || []);
+  if (runs.length === 0) {
+    return el('div', { class: 'card' }, el('h2', {}, 'Runs'),
+      el('div', { class: 'empty' }, 'no eval runs yet — goldgate eval --config … --split dev --extractor …'));
+  }
+  const rows = runs.map((r) => {
+    const t = r.thresholds[0];
+    return el('tr', { class: 'click', onclick: () => setTab('runs', r.runId) },
+      el('td', { class: 'sub2', style: 'white-space:nowrap' }, fmtWhen(r.at)),
+      el('td', { class: 'mono' }, r.runId),
+      el('td', {}, r.split),
+      el('td', {}, `${r.extractor} / ${r.model}`),
+      el('td', {}, r.mode),
+      el('td', { class: 'num' }, String(r.itemCount)),
+      el('td', { class: 'num' }, String(r.errored)),
+      el('td', { class: 'num' }, t ? pct(t.precision) : '—'),
+      el('td', { class: 'num' }, t ? pct(t.precisionWilsonLower) : '—'),
+      el('td', { class: 'num' }, t ? pct(t.recall) : '—'),
+      el('td', { class: 'num' }, t ? String(t.predictedPositives) : '—'),
+      el('td', {}, t ? gateChip(t.pass) : '—'));
+  });
+  return el('div', { class: 'card scroll-x' },
+    el('h2', {}, 'Runs ', el('span', { class: 'sub' }, `· ${runs.length} · metrics at the most inclusive threshold · click a row for detail`)),
+    el('table', { class: 't' },
+      el('thead', {}, el('tr', {},
+        el('th', {}, 'when'), el('th', {}, 'run'), el('th', {}, 'split'), el('th', {}, 'extractor'),
+        el('th', {}, 'mode'), el('th', { class: 'num' }, 'items'), el('th', { class: 'num' }, 'errored'),
+        el('th', { class: 'num' }, 'precision'), el('th', { class: 'num' }, 'Wilson95↓'),
+        el('th', { class: 'num' }, 'recall'), el('th', { class: 'num' }, 'n'), el('th', {}, 'gate'))),
+      el('tbody', {}, rows)));
+}
+
+function renderRunDetail() {
+  const head = el('div', { class: 'frow', style: 'margin-bottom:4px' },
+    el('button', { class: 'btn', onclick: () => setTab('runs') }, '← all runs'));
+  if (!S.runDetail || S.runDetail.id !== S.selectedRunId) {
+    return el('div', { class: 'cards' }, head, el('div', { class: 'empty' }, 'loading run…'));
+  }
+  if (!S.runDetail.data) {
+    return el('div', { class: 'cards' }, head,
+      el('div', { class: 'card err-banner' }, 'could not load run: ' + (S.runDetail.error || 'not found')));
+  }
+  const d = S.runDetail.data;
+  const cfg = d.config;
+  const blocks = d.perThreshold || [];
+  if (S.runThresholdIdx >= blocks.length) S.runThresholdIdx = 0;
+  const b = blocks[S.runThresholdIdx];
+
+  const cfgCard = el('div', { class: 'card' },
+    el('h2', {}, 'Run ', el('span', { class: 'mono' }, cfg.runId)),
+    el('div', { class: 'frow' },
+      chip('', '●', cfg.split), chip('', '●', `${cfg.extractor} / ${cfg.model}`),
+      chip('', '●', 'mode ' + cfg.mode), chip('', '●', 'context ' + cfg.contextWindow),
+      cfg.effort && cfg.effort !== '(n/a)' ? chip('', '●', 'effort ' + cfg.effort) : null,
+      chip('', '●', `${cfg.itemCount} items`),
+      Number(cfg.itemsSkipped) > 0 ? chip('warn', '⚠', `${cfg.itemsSkipped} skipped`) : null),
+    el('div', { class: 'sub2', style: 'margin-top:8px' },
+      `tokens ${d.totalUsage ? d.totalUsage.inputTokens + ' in / ' + d.totalUsage.outputTokens + ' out' : '—'}`),
+    el('details', { style: 'margin-top:8px' },
+      el('summary', { class: 'sub2', style: 'cursor:pointer' }, 'full recorded config (provenance)'),
+      el('pre', { class: 'mono', style: 'white-space:pre-wrap;overflow-wrap:anywhere' }, JSON.stringify(cfg, null, 2))));
+
+  if (!b) return el('div', { class: 'cards' }, head, cfgCard, el('div', { class: 'empty' }, 'no metric blocks in this run'));
+
+  const tSel = blocks.length > 1 ? el('div', { class: 'filters' },
+    el('label', {}, 'threshold'),
+    el('select', { class: 'in', onchange: (e) => { S.runThresholdIdx = Number(e.target.value); render(); } },
+      blocks.map((x, i) => {
+        const opt = el('option', { value: String(i) }, x.threshold === null ? '(none)' : '≥ ' + x.threshold);
+        if (i === S.runThresholdIdx) opt.selected = true;
+        return opt;
+      }))) : null;
+
+  const gateCard = el('div', { class: 'card' },
+    el('h2', {}, 'Gate'),
+    el('div', { class: 'frow' }, gateChip(b.gate.pass),
+      el('span', { class: 'sub2' }, `pooled over ${(S.overview.task.gatedKinds || []).join(' + ')}`)),
+    b.gate.reasons.length > 0 ? el('ul', { class: 'gate-reasons' }, b.gate.reasons.map((r) => el('li', {}, r))) : null);
+
+  const tiles = el('div', { class: 'row' },
+    tile('Pooled precision', null, `Wilson95↓ ${pct(b.pooled.precisionWilsonLower)} · n=${b.pooled.predictedPositives}`,
+      el('div', { class: 'value' }, pct(b.pooled.precision))),
+    tile('Pooled recall', null, `tp ${b.pooled.tp} · fp ${b.pooled.fp} · fn ${b.pooled.fn}`,
+      el('div', { class: 'value' }, pct(b.pooled.recall))),
+    tile('Errored items', null, 'never silently dropped',
+      el('div', { class: 'value' }, String(b.pooled.errored))),
+    b.negativeFpRate !== null ? tile('Negative-kind FP rate', null, 'random stratum only',
+      el('div', { class: 'value' }, pct(b.negativeFpRate))) : null);
+
+  const perKind = el('div', { class: 'card scroll-x' },
+    el('h2', {}, 'Per-kind metrics ', el('span', { class: 'sub' }, '· advisory detail; pooled is the gate input')),
+    el('table', { class: 't' },
+      el('thead', {}, el('tr', {},
+        el('th', {}, 'kind'), el('th', { class: 'num' }, 'tp'), el('th', { class: 'num' }, 'fp'), el('th', { class: 'num' }, 'fn'),
+        el('th', { class: 'num' }, 'precision'), el('th', { class: 'num' }, 'Wilson95↓'), el('th', { class: 'num' }, 'recall'), el('th', { class: 'num' }, 'f1'))),
+      el('tbody', {}, b.perKind.map((k) => el('tr', {},
+        el('td', {}, k.kind), el('td', { class: 'num' }, String(k.tp)), el('td', { class: 'num' }, String(k.fp)),
+        el('td', { class: 'num' }, String(k.fn)), el('td', { class: 'num' }, pct(k.precision)),
+        el('td', { class: 'num' }, pct(k.precisionWilsonLower)), el('td', { class: 'num' }, pct(k.recall)),
+        el('td', { class: 'num' }, pct(k.f1)))))));
+
+  const kinds = S.overview.task.kinds || Object.keys(b.confusion);
+  const heatCard = el('div', { class: 'card scroll-x' },
+    el('h2', {}, 'Confusion ', el('span', { class: 'sub' }, '· scored items only')),
+    heatmap(b.confusion, kinds));
+
+  let fieldsCard = null;
+  if (b.fields) {
+    const f = b.fields;
+    fieldsCard = el('div', { class: 'card' },
+      el('h2', {}, 'Field scoring ', el('span', { class: 'sub' }, '· on true positives')),
+      el('div', { class: 'frow' },
+        el('span', {}, `structured exact match ${pct(f.structuredExactMatch)} (${f.comparisons} comparisons)`),
+        el('span', { class: 'sub2' }, `free-text avg tokenF1 ${f.freeTextAvgTokenF1.toFixed(3)}`)),
+      f.mismatches.length > 0 ? el('details', { style: 'margin-top:8px', open: '' },
+        el('summary', { class: 'sub2', style: 'cursor:pointer' }, `${f.mismatches.length} mismatches (human review)`),
+        el('table', { class: 't' },
+          el('thead', {}, el('tr', {}, el('th', {}, 'item'), el('th', {}, 'field'), el('th', {}, 'gold'), el('th', {}, 'predicted'))),
+          el('tbody', {}, f.mismatches.map((m) => el('tr', {},
+            el('td', { class: 'mono' }, m.itemId), el('td', {}, m.field),
+            el('td', {}, m.gold), el('td', {}, m.predicted)))))) : null);
+  }
+
+  let calCard = null;
+  if (d.calibration) {
+    calCard = el('div', { class: 'card' },
+      el('h2', {}, 'Calibration ', el('span', { class: 'sub' }, '· self-reported confidence vs observed precision')),
+      el('table', { class: 't' },
+        el('thead', {}, el('tr', {},
+          el('th', {}, 'confidence'), el('th', { class: 'num' }, 'typed predictions'),
+          el('th', { class: 'num' }, 'correct'), el('th', {}, 'observed precision'))),
+        el('tbody', {}, d.calibration.map((c) => el('tr', {},
+          el('td', {}, c.confidence), el('td', { class: 'num' }, String(c.predictions)),
+          el('td', { class: 'num' }, String(c.correct)),
+          el('td', {}, el('div', { class: 'cellbar' },
+            el('div', { class: 'track' }, el('div', { class: 'fill', style: `width:${(c.observedPrecision * 100).toFixed(1)}%` })),
+            el('span', { class: 'v' }, pct(c.observedPrecision)))))))));
+  }
+
+  const errored = (d.items || []).filter((i) => i.predicted === null);
+  const errCard = errored.length > 0 ? el('div', { class: 'card' },
+    el('h2', {}, `Errored items · ${errored.length}`),
+    el('table', { class: 't' },
+      el('tbody', {}, errored.slice(0, 50).map((i) => el('tr', {},
+        el('td', { class: 'mono' }, i.itemId), el('td', { class: 'sub2' }, i.error || '')))))) : null;
+
+  return el('div', { class: 'cards' }, head, cfgCard, tSel, gateCard, tiles, perKind, heatCard, fieldsCard, calCard, errCard);
+}
+
+// ---------- trends ----------
+function renderTrends() {
+  const o = S.overview;
+  const all = [...(o.runs || [])].reverse();  // oldest → newest
+  const extractors = [...new Set(all.map((r) => r.extractor))];
+  const runsF = all.filter((r) => S.trendExtractor === 'all' || r.extractor === S.trendExtractor);
+
+  // available thresholds (from the task, falling back to what runs carry)
+  const levels = o.task.confidenceLevels || [];
+  const tKeys = levels.length > 0 ? levels : [null];
+  if (S.trendThreshold === undefined) S.trendThreshold = tKeys[0];
+
+  const filters = el('div', { class: 'filters' },
+    el('label', {}, 'threshold'),
+    el('select', { class: 'in', onchange: (e) => { S.trendThreshold = e.target.value === '__none__' ? null : e.target.value; render(); } },
+      tKeys.map((t) => {
+        const opt = el('option', { value: t === null ? '__none__' : t }, t === null ? '(none)' : '≥ ' + t);
+        if (t === S.trendThreshold) opt.selected = true;
+        return opt;
+      })),
+    el('label', {}, 'extractor'),
+    el('select', { class: 'in', onchange: (e) => { S.trendExtractor = e.target.value; render(); } },
+      [el('option', { value: 'all' }, 'all'), ...extractors.map((x) => {
+        const opt = el('option', { value: x }, x);
+        if (x === S.trendExtractor) opt.selected = true;
+        return opt;
+      })]));
+
+  if (runsF.length === 0) {
+    return el('div', { class: 'cards' }, filters,
+      el('div', { class: 'card' }, el('div', { class: 'empty' }, 'no runs to plot yet')));
+  }
+
+  const pick = (r) => r.thresholds.find((t) => t.threshold === S.trendThreshold) || r.thresholds[0];
+  const xs = runsF.map((r) => {
+    const t = pick(r);
+    return { label: fmtWhen(r.at), runId: r.runId, meta: `gate ${t && t.pass ? 'PASS' : 'FAIL'} · n=${t ? t.predictedPositives : 0} · ${r.extractor}` };
+  });
+  const mkSeries = (metric, withBand) => (['holdout', 'dev']).map((split) => ({
+    name: split === 'holdout' ? 'holdout (gate)' : 'dev (context)',
+    color: split === 'holdout' ? C.s1 : C.gray,
+    values: runsF.map((r) => {
+      if (r.split !== split) return null;
+      const t = pick(r);
+      return t ? t[metric] : null;
+    }),
+    band: withBand && split === 'holdout'
+      ? runsF.map((r) => {
+          if (r.split !== 'holdout') return null;
+          const t = pick(r);
+          return t ? { lo: t.precisionWilsonLower, hi: t.precision } : null;
+        })
+      : null,
+  }));
+  const onClick = (i) => setTab('runs', runsF[i].runId);
+  const legendItems = [{ name: 'holdout (gate)', color: C.s1 }, { name: 'dev (context)', color: C.gray }];
+
+  return el('div', { class: 'cards' },
+    filters,
+    el('div', { class: 'card chart-card' },
+      el('h2', {}, 'Pooled precision over runs ', el('span', { class: 'sub' }, '· band = down to the Wilson 95% lower bound · click a point for the run')),
+      lineChart({ xs, series: mkSeries('precision', true), onClick }),
+      chartLegend(legendItems)),
+    el('div', { class: 'card chart-card' },
+      el('h2', {}, 'Pooled recall over runs'),
+      lineChart({ xs, series: mkSeries('recall', false), onClick }),
+      chartLegend(legendItems)),
+    el('div', { class: 'sub2' }, 'table view: the Runs tab lists every plotted value.'));
+}
+
+// ---------- label (reviewer) ----------
+async function labelAction(path, body) {
+  // Answers echo the token of the prompt on screen; the server rejects a
+  // stale one (double-press / auto-repeat) instead of labeling the next
+  // item unseen.
+  const b = (path === '/api/label/answer' && S.label && S.label.token !== undefined)
+    ? { token: S.label.token, ...body } : (body || {});
+  try {
+    S.label = await api(path, b);
+    S.fetchError = null;
+  } catch (e) {
+    S.fetchError = e.message;
+  }
+  await loadOverview();
+  render();
+  schedulePoll();
+}
+
+function renderLabel() {
+  const o = S.overview;
+  const st = S.label;
+  if (!o.task.hasLabeling) {
+    return el('div', { class: 'card' }, el('h2', {}, 'Label'),
+      el('div', { class: 'empty' }, 'this task declares no labeling hooks — labels are brought externally'));
+  }
+
+  if (!st || (!st.active && !st.done) || (st.done && S.labelDismissed)) return renderLabelStart(null);
+  if (st.done) {
+    const summary = el('div', { class: 'card' },
+      el('h2', {}, 'Session finished'),
+      st.error ? el('div', { class: 'err-banner card' }, st.error)
+        : el('div', {}, 'Labeling session complete. Labels were appended after every item (crash-safe).'),
+      el('div', { class: 'frow', style: 'margin-top:10px' },
+        el('button', { class: 'btn pri', onclick: () => { S.labelDismissed = true; render(); } }, 'Start another session')));
+    return el('div', { class: 'cards' }, summary, transcriptCard(st));
+  }
+
+  // active session
+  const parts = [];
+  const headBits = [
+    chip('', '●', st.split + ' split'),
+    st.assist ? chip('', '●', 'assist: ' + st.assist) : chip('', '●', st.split === 'holdout' ? 'blind (enforced)' : 'unassisted'),
+  ];
+  if (st.prompt) {
+    const p = st.prompt;
+    parts.push(el('div', { class: 'card' },
+      el('div', { class: 'frow', style: 'justify-content:space-between' },
+        el('div', { class: 'frow' }, ...headBits, chip('', '●', p.stratum)),
+        el('div', { class: 'sub2' }, `item ${p.index} of ${p.total}`)),
+      el('div', { style: 'margin-top:6px' }, meter([{ n: p.index - 1, color: C.s1 }], p.total, null)),
+      el('div', { class: 'frow', style: 'margin-top:12px' }, el('span', { class: 'mono sub2' }, p.itemId)),
+      el('div', { class: 'itemtext' }, p.rendered),
+      p.context && p.context.length > 0 ? el('details', {},
+        el('summary', { class: 'sub2', style: 'cursor:pointer' }, `context · ${p.context.length} items`),
+        el('div', {}, p.context.map((c) => el('div', { class: 'itemtext', style: 'font-size:13px' }, c.text)))) : null,
+      p.proposal !== null && p.proposal !== undefined ? el('div', { class: 'proposal' },
+        el('div', { class: 'sub2', style: 'margin-bottom:4px' }, 'model proposal — accepting unchanged records provenance: assisted'),
+        el('div', { class: 'mono' }, JSON.stringify(p.proposal)),
+        el('div', { style: 'margin-top:8px' },
+          el('button', { class: 'btn pri', onclick: () => labelAction('/api/label/answer', { value: 'a' }) },
+            'Accept proposal'), el('span', { class: 'sub2 mono', style: 'margin-left:8px' }, 'a'))) : null,
+      el('div', { class: 'kinds' },
+        p.kinds.map((k, i) => el('button', { class: 'kind', onclick: () => labelAction('/api/label/answer', { value: String(i + 1) }) },
+          el('span', { class: 'key' }, String(i + 1)), k))),
+      el('div', { class: 'frow' },
+        el('button', { class: 'btn', onclick: () => labelAction('/api/label/answer', { value: 'k' }) }, 'Skip (k)'),
+        el('button', { class: 'btn', onclick: () => labelAction('/api/label/stop') }, 'Stop session'))));
+  } else if (st.question) {
+    const input = el('input', { class: 'in', placeholder: st.question.fallback, id: 'qinput' });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') labelAction('/api/label/answer', { value: input.value }); });
+    parts.push(el('div', { class: 'card' },
+      el('div', { class: 'frow' }, ...headBits),
+      el('h2', { style: 'margin-top:10px' }, 'Field entry'),
+      el('div', {}, st.question.text),
+      el('div', { class: 'frow', style: 'margin-top:10px' }, input,
+        el('button', { class: 'btn pri', onclick: () => labelAction('/api/label/answer', { value: input.value }) }, 'Save')),
+      el('div', { class: 'note' }, `empty ↵ uses the fallback: ${st.question.fallback}`)));
+    setTimeout(() => { const q = document.getElementById('qinput'); if (q) q.focus(); }, 0);
+  } else {
+    parts.push(el('div', { class: 'card' },
+      el('div', { class: 'frow' }, ...headBits),
+      el('div', { class: 'pulse', style: 'margin-top:10px' }, 'working — extracting the assist proposal…')));
+  }
+  parts.push(transcriptCard(st));
+  return el('div', { class: 'cards' }, ...parts);
+}
+
+function transcriptCard(st) {
+  if (!st.transcript || st.transcript.length === 0) return null;
+  return el('div', { class: 'card' },
+    el('details', {},
+      el('summary', { class: 'sub2', style: 'cursor:pointer' }, 'session transcript'),
+      el('div', { class: 'mono sub2 transcript' }, st.transcript.map((l) => el('div', {}, l)))));
+}
+
+function renderLabelStart(prevError) {
+  const o = S.overview;
+  const wf = o.workflow;
+  const err = el('div', { class: 'dlg-err' }, prevError || '');
+  const selSplit = el('select', { class: 'in' },
+    el('option', { value: 'dev' }, 'dev'),
+    el('option', { value: 'holdout' }, 'holdout (blind)'));
+  const selAssist = el('select', { class: 'in' },
+    el('option', { value: '' }, '(none)'),
+    o.extractors.map((x) => el('option', { value: x }, x)));
+  const assistNote = el('div', { class: 'note' });
+  const syncAssist = () => {
+    const blind = selSplit.value === 'holdout';
+    selAssist.disabled = blind;
+    if (blind) selAssist.value = '';
+    assistNote.textContent = blind
+      ? 'holdout labeling is blind by construction — assistance is refused by the harness'
+      : 'optional: an extractor pre-labels each item; accepting unchanged records provenance: assisted';
+  };
+  selSplit.addEventListener('change', syncAssist);
+  syncAssist();
+  const inModel = el('input', { class: 'in', placeholder: o.defaultModel || 'model for the assist extractor' });
+
+  const start = async () => {
+    try {
+      S.labelDismissed = false;
+      S.label = await api('/api/label/start', {
+        split: selSplit.value,
+        ...(selAssist.value ? { assist: selAssist.value } : {}),
+        ...(inModel.value ? { model: inModel.value } : {}),
+      });
+      render(); schedulePoll();
+    } catch (e) { err.textContent = e.message; }
+  };
+
+  const prog = (name, p) => el('div', { style: 'margin-bottom:10px' },
+    el('div', { class: 'frow', style: 'justify-content:space-between;margin-bottom:4px' },
+      el('span', {}, name), el('span', { class: 'sub2' }, `${p.pending} pending`)),
+    meter([{ n: p.hand, color: C.s1 }, { n: p.assisted, color: C.s2 }], p.total, null));
+
+  return el('div', { class: 'cards' },
+    el('div', { class: 'card', style: 'max-width:560px' },
+      el('h2', {}, 'Start a labeling session'),
+      prog('dev', wf.dev), prog('holdout', wf.holdout),
+      el('label', { class: 'f' }, 'split'), selSplit,
+      el('label', { class: 'f' }, 'assist extractor'), selAssist, assistNote,
+      el('label', { class: 'f' }, 'assist model'), inModel,
+      err,
+      el('div', { class: 'dlg-actions', style: 'justify-content:flex-start' },
+        el('button', { class: 'btn pri', onclick: start }, 'Start labeling'))));
+}
+
+// keyboard shortcuts for the reviewer
+window.addEventListener('keydown', (e) => {
+  if (S.tab !== 'label' || !S.label || !S.label.active || !S.label.prompt) return;
+  const tag = document.activeElement && document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+  const p = S.label.prompt;
+  if (/^[1-9]$/.test(e.key) && Number(e.key) <= p.kinds.length) {
+    labelAction('/api/label/answer', { value: e.key });
+  } else if (e.key === 'a' && p.proposal !== null && p.proposal !== undefined) {
+    labelAction('/api/label/answer', { value: 'a' });
+  } else if (e.key === 'k') {
+    labelAction('/api/label/answer', { value: 'k' });
+  }
+});
+
+// ---------- boot ----------
+(function boot() {
+  const h = location.hash.slice(1);
+  const m = /^runs\/(.+)$/.exec(h);
+  if (m) { S.tab = 'runs'; S.selectedRunId = decodeURIComponent(m[1]); }
+  else if (TABS.some(([k]) => k === h)) S.tab = h;
+  refresh();
+})();
+</script>
+</body>
+</html>

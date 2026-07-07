@@ -6,3 +6,6 @@ export * from './runner.js';
 export * from './report.js';
 export * from './label.js';
 export * from './corpus.js';
+export * from './workflow.js';
+export * from './runs.js';
+export * from './server.js';
