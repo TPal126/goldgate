@@ -352,7 +352,7 @@ npx goldgate decide --config goldgate.config.ts --ship --note "gate held at n=53
 
 Enforcement is refusal-first, in the project's spirit:
 
-- `eval --split holdout` **refuses** when no configuration is frozen, and when the run's extractor / model / effort / context window / mode / config hashes differ from the frozen record. `--allow-unfrozen` is the explicit escape hatch — the run then proceeds but is recorded as `unfrozen` in the event log, visibly.
+- `eval --split holdout` **refuses** when: no configuration is frozen; the run's extractor / model / effort / context window / mode / config hashes differ from the frozen record; **any holdout item is still unlabeled** (a partial holdout would silently gate on a subset); or **the frozen operating threshold is no longer a declared confidence level** (the gate would be recorded at the wrong threshold). `--allow-unfrozen` is the explicit escape hatch for all of these — the run then proceeds but is recorded as `unfrozen` in the event log, visibly.
 - Repeat holdout evals inside a round are allowed (a crashed run must be re-runnable) but loudly warned and recorded with `repeat: true` — the first completed run is the gate; further tuning is a declared new round (`goldgate freeze` again).
 - `decide` refuses unless the round has a completed gate run, and ties itself to that round's first (gate) run id.
 

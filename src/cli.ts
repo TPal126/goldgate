@@ -10,7 +10,7 @@ import { loadConfig } from './config.js';
 import { readJsonlFile, writeJsonlFile } from './corpus.js';
 import { stratifiedSample } from './sample.js';
 import type { SampleItem } from './sample.js';
-import { runLabelSession } from './label.js';
+import { runLabelSession, pendingItems } from './label.js';
 import { runEval } from './runner.js';
 import { isBatchExtractor } from './task.js';
 import type { ExtractFn, LabelIO } from './task.js';
@@ -159,27 +159,71 @@ async function cmdEval(): Promise<void> {
   // frozen configuration (goldgate freeze). --allow-unfrozen proceeds
   // anyway but the violation is recorded in the event log, visibly.
   const actualMode = isBatchExtractor(extractor) ? 'batch' as const : 'sync' as const;
+  const allowUnfrozen = flag('allow-unfrozen');
   const wfPath = workflowPath(config.paths);
   const events = readWorkflow(wfPath);
   let holdoutVerdict: Extract<HoldoutVerdict, { ok: true }> | null = null;
+  // Drift the frozen-config seal (checkHoldoutRun) doesn't cover: a stale
+  // operating threshold or a partially-labeled holdout. Either forces the
+  // recorded event to `unfrozen` when proceeding under --allow-unfrozen.
+  let holdoutUnfrozen = false;
   if (split === 'holdout') {
     const verdict = checkHoldoutRun(events, {
       extractor: extractorName, model,
       ...(effort !== undefined ? { effort } : {}),
       contextWindow, mode: actualMode,
       ...(config.task.configHashes !== undefined ? { configHashes: config.task.configHashes } : {}),
-    }, flag('allow-unfrozen'));
+    }, allowUnfrozen);
     if (!verdict.ok) {
       for (const r of verdict.reasons) console.error(r);
       process.exit(1);
     }
     for (const w of verdict.warnings) console.warn(w);
     holdoutVerdict = verdict;
+
+    // The gate is recorded at the frozen operating threshold. If the task no
+    // longer declares that threshold (confidenceLevels edited after the
+    // freeze), the run emits no matching block and the verdict would be
+    // silently recorded at a different threshold. Refuse before spending a run.
+    const frozenThreshold = latestFreeze(events)?.frozen.threshold;
+    if (frozenThreshold !== undefined && !(config.task.confidenceLevels ?? []).includes(frozenThreshold)) {
+      const levels = (config.task.confidenceLevels ?? []).join(', ') || 'none';
+      const msg =
+        `holdout eval refused: frozen operating threshold '${frozenThreshold}' is no longer one of the ` +
+        `task's confidenceLevels (${levels}) — the gate would be recorded at the wrong threshold; ` +
+        `re-freeze to declare a new round`;
+      if (!allowUnfrozen) {
+        console.error(msg);
+        process.exit(1);
+      }
+      console.warn(msg + ' — recorded as unfrozen');
+      holdoutUnfrozen = true;
+    }
   }
 
   const corpus = readJsonlFile<{ id: string; text: string }>(corpusPath);
   const labels = readJsonlFile(labelsPath);
   const sample = readJsonlFile<SampleItem>(samplePath);
+
+  // The sealed holdout must be fully labeled before its single gate run. An
+  // eval over a partially-labeled holdout silently scores only the labeled
+  // subset (the rest are counted as itemsSkipped) — which would let `decide`
+  // ship on a fraction of the test set. Refuse while any holdout item is
+  // unlabeled, before spending a run.
+  if (split === 'holdout') {
+    const pending = pendingItems(sample, labels, 'holdout', config.task);
+    if (pending.length > 0) {
+      const msg =
+        `holdout eval refused: ${pending.length} holdout item(s) still unlabeled — the sealed holdout ` +
+        `must be fully labeled before its single gate run (goldgate label --split holdout)`;
+      if (!allowUnfrozen) {
+        console.error(msg);
+        process.exit(1);
+      }
+      console.warn(msg + ' — proceeding and recording as unfrozen');
+      holdoutUnfrozen = true;
+    }
+  }
 
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
   const runId = `${stamp}-${extractorName}-${split}`;
@@ -204,7 +248,9 @@ async function cmdEval(): Promise<void> {
   console.log(`report: ${summary.reportPath}`);
 
   // Gate verdict at the frozen operating threshold when one was declared,
-  // else at the most inclusive block.
+  // else at the most inclusive block. A frozen threshold with no matching
+  // block was already refused above (unless --allow-unfrozen), so the
+  // fallback here only applies to unfrozen/unthresholded runs.
   const frozenThreshold = split === 'holdout' ? latestFreeze(events)?.frozen.threshold : undefined;
   const block = (frozenThreshold !== undefined
     ? summary.perThreshold.find((b) => b.threshold === frozenThreshold)
@@ -219,7 +265,7 @@ async function cmdEval(): Promise<void> {
       at: new Date().toISOString(), type: 'holdout-eval',
       round: holdoutVerdict.round, runId, gate: block?.gate ?? null,
       repeat: holdoutVerdict.repeat,
-      ...(holdoutVerdict.unfrozen ? { unfrozen: true } : {}),
+      ...(holdoutVerdict.unfrozen || holdoutUnfrozen ? { unfrozen: true } : {}),
     });
   }
 }
