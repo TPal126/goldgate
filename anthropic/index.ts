@@ -42,6 +42,20 @@ export interface ClaudeExtractorOptions<Item> {
   /** default 2000 */
   maxTokens?: number;
   apiKey?: string;
+  /**
+   * Optional per-call upstream timeout (milliseconds). The SDK's own request
+   * `timeout` is threaded through AND a local AbortController is armed for the
+   * same budget, so the underlying fetch is GENUINELY cancelled (the abort is
+   * observable on the signal) rather than merely surfacing a late 504. Omit to
+   * keep the SDK default (10 minutes) — additive and backward-compatible.
+   */
+  timeoutMs?: number;
+  /**
+   * Optional external AbortSignal. If it (or the timeout) fires, the in-flight
+   * request is aborted. Merged into the local controller so a caller can cancel
+   * a parse from outside (e.g. a server shutting down).
+   */
+  signal?: AbortSignal;
 }
 
 function anthropicClientFor(apiKey: string | undefined): Anthropic {
@@ -55,30 +69,65 @@ export function createClaudeExtractFn<Item, Pred>(
   const format = zodOutputFormat(opts.schema);
 
   return async (input) => {
-    const resp = await client.messages.parse({
-      model: opts.model,
-      max_tokens: opts.maxTokens ?? 2000,
-      thinking: { type: 'adaptive' },
-      system: opts.systemPrompt,
-      messages: [{ role: 'user', content: opts.renderInput(input) }],
-      output_config: {
-        format,
-        ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
-      },
-    });
-    // Conservative by refusal-to-fabricate: a non-end_turn stop or a null
-    // parsed_output surfaces as a thrown error — callers (the eval runner)
-    // record it as an errored item rather than fabricating a prediction.
-    if (resp.stop_reason !== 'end_turn' || resp.parsed_output === null || resp.parsed_output === undefined) {
-      throw new Error(`extraction failed (stop_reason=${resp.stop_reason ?? 'null'})`);
-    }
-    return {
-      prediction: resp.parsed_output as Pred,
-      usage: {
-        inputTokens: resp.usage.input_tokens,
-        outputTokens: resp.usage.output_tokens,
-      },
+    // A locally-armed AbortController makes the timeout GENUINELY cancelling:
+    // even if the SDK's own `timeout` did nothing, this signal aborts the fetch,
+    // and the abort is observable on `controller.signal`. An external signal is
+    // merged in so a caller can cancel from outside. The timer is always cleared
+    // in `finally` so a resolved/rejected request leaves no dangling timer and no
+    // late unhandled rejection.
+    const controller = new AbortController();
+    const external = opts.signal;
+    const onExternalAbort = (): void => {
+      controller.abort((external as AbortSignal | undefined)?.reason);
     };
+    if (external !== undefined) {
+      if (external.aborted) controller.abort(external.reason);
+      else external.addEventListener('abort', onExternalAbort, { once: true });
+    }
+    const timeoutMs = opts.timeoutMs;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (timeoutMs !== undefined) {
+      timer = setTimeout(() => {
+        controller.abort(new Error(`extraction timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      // Do not keep the event loop alive purely for this timer (Node only).
+      (timer as { unref?: () => void }).unref?.();
+    }
+    try {
+      const resp = await client.messages.parse(
+        {
+          model: opts.model,
+          max_tokens: opts.maxTokens ?? 2000,
+          thinking: { type: 'adaptive' },
+          system: opts.systemPrompt,
+          messages: [{ role: 'user', content: opts.renderInput(input) }],
+          output_config: {
+            format,
+            ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
+          },
+        },
+        {
+          signal: controller.signal,
+          ...(timeoutMs !== undefined ? { timeout: timeoutMs } : {}),
+        },
+      );
+      // Conservative by refusal-to-fabricate: a non-end_turn stop or a null
+      // parsed_output surfaces as a thrown error — callers (the eval runner)
+      // record it as an errored item rather than fabricating a prediction.
+      if (resp.stop_reason !== 'end_turn' || resp.parsed_output === null || resp.parsed_output === undefined) {
+        throw new Error(`extraction failed (stop_reason=${resp.stop_reason ?? 'null'})`);
+      }
+      return {
+        prediction: resp.parsed_output as Pred,
+        usage: {
+          inputTokens: resp.usage.input_tokens,
+          outputTokens: resp.usage.output_tokens,
+        },
+      };
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      if (external !== undefined) external.removeEventListener('abort', onExternalAbort);
+    }
   };
 }
 

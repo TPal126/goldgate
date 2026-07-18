@@ -92,6 +92,66 @@ describe('createClaudeExtractFn', () => {
   });
 });
 
+describe('createClaudeExtractFn timeout/signal (cancelling)', () => {
+  it('threads the SDK timeout AND a genuinely-cancelling signal into messages.parse; aborts on timeout', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    // The mock rejects ONLY when its request signal is actually aborted — so a
+    // pass proves the fetch abort is observed, not merely a fast fake 504.
+    mockParse.mockImplementationOnce((_params: unknown, options: { signal: AbortSignal }) => {
+      capturedSignal = options.signal;
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener(
+          'abort',
+          () => reject((options.signal.reason as Error) ?? new Error('aborted')),
+          { once: true },
+        );
+      });
+    });
+    const fn = createClaudeExtractFn<Item, unknown>({
+      schema, systemPrompt: 'sys', renderInput: () => 'x', model: 'claude-opus-4-8', timeoutMs: 5,
+    });
+    await expect(fn({ target: { id: 't1', text: 'hi' }, context: [] })).rejects.toThrow(/timed out/);
+    expect(capturedSignal?.aborted).toBe(true);
+    // The SDK's own request timeout is threaded too.
+    expect(mockParse.mock.calls[0]![1]).toMatchObject({ timeout: 5 });
+  });
+
+  it('aborts the in-flight request when an EXTERNAL signal fires', async () => {
+    const ac = new AbortController();
+    mockParse.mockImplementationOnce((_params: unknown, options: { signal: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(new Error('aborted-by-signal')), { once: true });
+      }));
+    const fn = createClaudeExtractFn<Item, unknown>({
+      schema, systemPrompt: 'sys', renderInput: () => 'x', model: 'claude-opus-4-8', signal: ac.signal,
+    });
+    const p = fn({ target: { id: 't1', text: 'hi' }, context: [] });
+    ac.abort(new Error('caller cancelled'));
+    await expect(p).rejects.toThrow(/aborted-by-signal/);
+  });
+
+  it('clears the timeout timer on a normal resolve — no late abort or unhandled rejection', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    mockParse.mockImplementationOnce((_params: unknown, options: { signal: AbortSignal }) => {
+      capturedSignal = options.signal;
+      return Promise.resolve({
+        stop_reason: 'end_turn',
+        parsed_output: { kind: 'note', certainty: 'low' },
+        usage: { input_tokens: 1, output_tokens: 1 },
+      });
+    });
+    const fn = createClaudeExtractFn<Item, { kind: string; certainty: string }>({
+      schema, systemPrompt: 'sys', renderInput: () => 'x', model: 'claude-opus-4-8', timeoutMs: 5,
+    });
+    const r = await fn({ target: { id: 't1', text: 'hi' }, context: [] });
+    expect(r.prediction).toEqual({ kind: 'note', certainty: 'low' });
+    // Wait well past the 5ms budget: if the timer had NOT been cleared it would
+    // now have aborted the (already-settled) signal.
+    await new Promise((res) => setTimeout(res, 25));
+    expect(capturedSignal?.aborted).toBe(false);
+  });
+});
+
 describe('createClaudeBatch', () => {
   beforeEach(() => {
     vi.useFakeTimers();
