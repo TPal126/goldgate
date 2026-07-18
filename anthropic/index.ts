@@ -31,6 +31,21 @@ export const ANTHROPIC_PRICES: Record<string, { in: number; out: number }> = {
   'claude-haiku-4-5': { in: 1, out: 5 },
 };
 
+/**
+ * A STABLE, typed timeout error thrown when THIS adapter's own upstream timeout
+ * fires. The Anthropic SDK converts an aborted request into an `APIUserAbortError`
+ * ("Request was aborted.") whose name/message do not mention a timeout, so a
+ * consumer cannot distinguish a genuine timeout from any other abort. Rethrowing
+ * as `GoldgateTimeoutError` (recognizable `.name`) lets a server map a real
+ * timeout to 504 rather than a generic 502.
+ */
+export class GoldgateTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GoldgateTimeoutError';
+  }
+}
+
 export interface ClaudeExtractorOptions<Item> {
   /** consumer's Zod schema */
   schema: ZodType;
@@ -42,6 +57,9 @@ export interface ClaudeExtractorOptions<Item> {
   /** default 2000 */
   maxTokens?: number;
   apiKey?: string;
+  /** Optional custom fetch, forwarded to the Anthropic client (a test seam / proxy
+   * hook). Additive and backward-compatible; omit to use the SDK default. */
+  fetch?: typeof globalThis.fetch;
   /**
    * Optional per-call upstream timeout (milliseconds). The SDK's own request
    * `timeout` is threaded through AND a local AbortController is armed for the
@@ -58,14 +76,20 @@ export interface ClaudeExtractorOptions<Item> {
   signal?: AbortSignal;
 }
 
-function anthropicClientFor(apiKey: string | undefined): Anthropic {
-  return new Anthropic(apiKey !== undefined ? { apiKey } : {});
+function anthropicClientFor(
+  apiKey: string | undefined,
+  fetchImpl?: typeof globalThis.fetch,
+): Anthropic {
+  const clientOpts: { apiKey?: string; fetch?: typeof globalThis.fetch } = {};
+  if (apiKey !== undefined) clientOpts.apiKey = apiKey;
+  if (fetchImpl !== undefined) clientOpts.fetch = fetchImpl;
+  return new Anthropic(clientOpts);
 }
 
 export function createClaudeExtractFn<Item, Pred>(
   opts: ClaudeExtractorOptions<Item>,
 ): ExtractFn<Item, Pred> {
-  const client = anthropicClientFor(opts.apiKey);
+  const client = anthropicClientFor(opts.apiKey, opts.fetch);
   const format = zodOutputFormat(opts.schema);
 
   return async (input) => {
@@ -86,8 +110,12 @@ export function createClaudeExtractFn<Item, Pred>(
     }
     const timeoutMs = opts.timeoutMs;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Set when OUR timeout fired (vs. an external caller-driven abort) so the catch
+    // can rethrow a recognizable GoldgateTimeoutError only for a genuine timeout.
+    let timedOut = false;
     if (timeoutMs !== undefined) {
       timer = setTimeout(() => {
+        timedOut = true;
         controller.abort(new Error(`extraction timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       // Do not keep the event loop alive purely for this timer (Node only).
@@ -124,6 +152,15 @@ export function createClaudeExtractFn<Item, Pred>(
           outputTokens: resp.usage.output_tokens,
         },
       };
+    } catch (err) {
+      // If OUR timeout fired, the SDK surfaces the abort as an APIUserAbortError
+      // (name/message with no timeout signal). Rethrow a stable GoldgateTimeoutError
+      // so a server maps a real timeout to 504, not a generic 502. An EXTERNAL abort
+      // (timedOut === false) is left as-is — it is a caller cancel, not a timeout.
+      if (timedOut) {
+        throw new GoldgateTimeoutError(`extraction timed out after ${timeoutMs}ms`);
+      }
+      throw err;
     } finally {
       if (timer !== undefined) clearTimeout(timer);
       if (external !== undefined) external.removeEventListener('abort', onExternalAbort);

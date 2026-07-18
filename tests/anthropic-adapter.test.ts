@@ -23,7 +23,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
   })),
 }));
 
-const { createClaudeExtractFn, createClaudeBatch, schemaHash, ANTHROPIC_PRICES } =
+const { createClaudeExtractFn, createClaudeBatch, schemaHash, ANTHROPIC_PRICES, GoldgateTimeoutError } =
   await import('../anthropic/index.js');
 
 interface Item { id: string; text: string }
@@ -110,10 +110,26 @@ describe('createClaudeExtractFn timeout/signal (cancelling)', () => {
     const fn = createClaudeExtractFn<Item, unknown>({
       schema, systemPrompt: 'sys', renderInput: () => 'x', model: 'claude-opus-4-8', timeoutMs: 5,
     });
-    await expect(fn({ target: { id: 't1', text: 'hi' }, context: [] })).rejects.toThrow(/timed out/);
+    // The timeout rethrows as a STABLE typed GoldgateTimeoutError (so a server can
+    // map it to 504), even when the SDK surfaces the abort as a different error.
+    await expect(fn({ target: { id: 't1', text: 'hi' }, context: [] })).rejects.toBeInstanceOf(GoldgateTimeoutError);
     expect(capturedSignal?.aborted).toBe(true);
     // The SDK's own request timeout is threaded too.
     expect(mockParse.mock.calls[0]![1]).toMatchObject({ timeout: 5 });
+  });
+
+  it('an EXTERNAL abort is NOT reclassified as a timeout (only our timeout throws GoldgateTimeoutError)', async () => {
+    const ac = new AbortController();
+    mockParse.mockImplementationOnce((_params: unknown, options: { signal: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(new Error('aborted-by-signal')), { once: true });
+      }));
+    const fn = createClaudeExtractFn<Item, unknown>({
+      schema, systemPrompt: 'sys', renderInput: () => 'x', model: 'claude-opus-4-8', signal: ac.signal,
+    });
+    const p = fn({ target: { id: 't1', text: 'hi' }, context: [] });
+    ac.abort(new Error('caller cancelled'));
+    await expect(p).rejects.not.toBeInstanceOf(GoldgateTimeoutError);
   });
 
   it('aborts the in-flight request when an EXTERNAL signal fires', async () => {
